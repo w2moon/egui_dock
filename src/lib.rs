@@ -123,8 +123,9 @@
 //! [`egui::CentralPanel`] created by [`DockArea::show`].
 //!
 //! On the other hand, there can be multiple `Window` surfaces. Those represent surfaces that were
-//! created by undocking tabs from the `Main` surface, and each of them is rendered inside
-//! a [`egui::Window`] - hence their name.
+//! created by undocking tabs from the `Main` surface. By default each of them is rendered inside
+//! a [`egui::Window`]. When [`DockArea::multi_viewport`] is enabled, detached surfaces are shown in
+//! native OS windows via [`egui::viewport`] instead (similar to Dear ImGui viewports).
 //!
 //! While most of surface management will be done by the user of your application, you can also do it
 //! programatically using the [`DockState`] API.
@@ -142,6 +143,23 @@
 //! let window_state = dock_state.get_window_state_mut(surface_index).unwrap();
 //! window_state.set_position(Pos2::ZERO);
 //! window_state.set_size(Vec2::splat(100.0));
+//!
+//! // Use native OS windows for detached surfaces (requires multi-viewport backend):
+//! # use egui_dock::DockArea;
+//! # struct MyTabViewer;
+//! # impl egui_dock::TabViewer for MyTabViewer {
+//! #     type Tab = String;
+//! #     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText { tab.as_str().into() }
+//! #     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) { ui.label(tab); }
+//! # }
+//! # let mut dock_state = DockState::new(vec![]);
+//! # egui::__run_test_ctx(|ctx| {
+//! # egui::CentralPanel::default().show(ctx, |ui| {
+//! DockArea::new(&mut dock_state)
+//!     .multi_viewport(true)
+//!     .show_inside(ui, &mut MyTabViewer);
+//! # });
+//! # });
 //! ```
 //!
 //! For more details, see: [`DockState`].

@@ -36,6 +36,10 @@ pub struct DockArea<'tree, Tab> {
     secondary_button_context_menu: bool,
     allowed_splits: AllowedSplits,
     window_bounds: Option<Rect>,
+    /// When `true`, detached surfaces are shown as native OS viewports instead of [`egui::Window`].
+    multi_viewport: bool,
+    /// Whether detached native viewports use OS window decorations (title bar, resize frame).
+    native_window_decorations: bool,
 
     to_remove: Vec<TabRemoval>,
     to_detach: Vec<TabPath>,
@@ -64,6 +68,8 @@ impl<'tree, Tab> DockArea<'tree, Tab> {
             new_focused: None,
             tab_hover_rect: None,
             window_bounds: None,
+            multi_viewport: false,
+            native_window_decorations: true,
             show_window_close_buttons: true,
             show_window_collapse_buttons: true,
             show_leaf_close_all_buttons: true,
@@ -171,6 +177,26 @@ impl<'tree, Tab> DockArea<'tree, Tab> {
     #[inline(always)]
     pub fn window_bounds(mut self, bounds: Rect) -> Self {
         self.window_bounds = Some(bounds);
+        self
+    }
+
+    /// When enabled, tabs detached into new surfaces are shown in native OS windows via
+    /// [`egui::viewport`] instead of floating [`egui::Window`] widgets inside the root viewport.
+    ///
+    /// Requires a backend that supports multiple viewports (for example `eframe` with the default
+    /// winit/glow stack). If unsupported, egui will embed the surface as a child window.
+    #[inline(always)]
+    pub fn multi_viewport(mut self, multi_viewport: bool) -> Self {
+        self.multi_viewport = multi_viewport;
+        self
+    }
+
+    /// Sets whether detached native viewports use OS decorations (title bar and resize frame).
+    ///
+    /// Only applies when [`Self::multi_viewport`] is enabled. Defaults to `true`.
+    #[inline(always)]
+    pub fn native_window_decorations(mut self, decorations: bool) -> Self {
+        self.native_window_decorations = decorations;
         self
     }
 

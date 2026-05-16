@@ -1,4 +1,6 @@
-use egui::{Id, Pos2, Rect, Vec2};
+use egui::{Id, Pos2, Rect, Vec2, ViewportBuilder, ViewportId};
+
+use crate::SurfaceIndex;
 
 /// The state of a [`Surface::Window`](crate::Surface::Window).
 ///
@@ -47,6 +49,11 @@ impl WindowState {
     /// Create a default window state.
     pub(crate) fn new() -> Self {
         Self::default()
+    }
+
+    /// Returns a stable [`ViewportId`] for a detached window surface.
+    pub fn viewport_id(dock_area_id: Id, surface_index: SurfaceIndex) -> ViewportId {
+        ViewportId::from_hash_of(("egui_dock_window", dock_area_id, surface_index.0))
     }
 
     /// Set the position for this window in screen coordinates.
@@ -111,6 +118,42 @@ impl WindowState {
     #[inline(always)]
     pub(crate) fn is_minimized(&self) -> bool {
         self.minimized
+    }
+
+    #[inline(always)]
+    pub(crate) fn update_screen_rect_from_viewport(&mut self, outer_rect: Option<Rect>) {
+        if let Some(rect) = outer_rect {
+            self.screen_rect = Some(rect);
+        }
+    }
+
+    /// Builds a [`ViewportBuilder`] for a native OS window hosting this surface.
+    pub(crate) fn create_viewport_builder(
+        &mut self,
+        title: String,
+        decorations: bool,
+        inner_size_override: Option<Vec2>,
+    ) -> ViewportBuilder {
+        let new = self.new;
+        let mut builder = ViewportBuilder::default()
+            .with_title(title)
+            .with_decorations(decorations);
+
+        if let Some(position) = self.next_position.take() {
+            builder = builder.with_position(position);
+        }
+        if let Some(size) = inner_size_override {
+            builder = builder.with_inner_size(size);
+            self.next_size = None;
+        } else if let Some(size) = self.next_size.take() {
+            builder = builder.with_inner_size(size);
+        } else if new {
+            if let Some(height) = self.expanded_height.take() {
+                builder = builder.with_min_inner_size(Vec2::new(200.0, height));
+            }
+        }
+        self.new = false;
+        builder
     }
 
     //the 'static in this case means that the `open` field is always `None`

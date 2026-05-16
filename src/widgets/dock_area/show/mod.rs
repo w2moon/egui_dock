@@ -1,7 +1,7 @@
 use duplicate::duplicate;
 use egui::{
     CentralPanel, Color32, Context, CornerRadius, CursorIcon, EventFilter, Frame, Key, Pos2, Rect,
-    Sense, StrokeKind, Ui, Vec2,
+    Sense, StrokeKind, Ui, Vec2, ViewportCommand,
 };
 use paste::paste;
 
@@ -12,11 +12,12 @@ use crate::NodePath;
 use crate::{
     utils::{expand_to_pixel, fade_dock_style, map_to_pixel},
     AllowedSplits, DockArea, Node, NodeIndex, OverlayType, Style, SurfaceIndex, TabDestination,
-    TabViewer,
+    TabViewer, WindowState,
 };
 
 mod leaf;
 mod main_surface;
+mod viewport_surface;
 mod window_surface;
 
 impl<Tab> DockArea<'_, Tab> {
@@ -103,16 +104,25 @@ impl<Tab> DockArea<'_, Tab> {
             })
         };
 
+        let fade_arg = fade_style.as_ref().map(|(style, factor)| {
+            (style, *factor, fade_surface.unwrap_or(SurfaceIndex::main()))
+        });
+
         for &surface_index in self.dock_state.valid_surface_indices().iter() {
+            if self.multi_viewport && !surface_index.is_main() {
+                continue;
+            }
             self.show_surface_inside(
                 surface_index,
                 ui,
                 tab_viewer,
                 &mut state,
-                fade_style.as_ref().map(|(style, factor)| {
-                    (style, *factor, fade_surface.unwrap_or(SurfaceIndex::main()))
-                }),
+                fade_arg,
             );
+        }
+
+        if self.multi_viewport {
+            self.show_viewport_surfaces(ui.ctx(), tab_viewer, &mut state, fade_arg);
         }
 
         for removal in self.to_remove.drain(..).rev() {
@@ -161,6 +171,13 @@ impl<Tab> DockArea<'_, Tab> {
                         }
                     }
                     if all_tabs_are_closable {
+                        if self.multi_viewport {
+                            let viewport_id = WindowState::viewport_id(self.id, surface);
+                            ui.ctx().send_viewport_cmd_to(
+                                viewport_id,
+                                ViewportCommand::Close,
+                            );
+                        }
                         self.dock_state.remove_surface(surface);
                     }
                 }

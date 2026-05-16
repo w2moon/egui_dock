@@ -35,5 +35,8 @@ eframe = { version = "0.34", default-features = false, features = [
 serde_json = { version = "1" }
 
 [[example]]
+name = "multi_viewport"
+
+[[example]]
 name = "save_load_dock_state"
 required-features = ["serde"]
