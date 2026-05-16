@@ -30,11 +30,11 @@ impl<Tab> DockArea<'_, Tab> {
         let mut surfaces_to_close = Vec::new();
 
         for surf_index in surface_indices {
-            let native = self
+            let use_native = self
                 .dock_state
                 .get_window_state(surf_index)
-                .is_some_and(|ws| ws.uses_native_viewport());
-            if !native {
+                .is_some_and(|ws| ws.uses_native_viewport() && !ws.is_floating_in_viewport());
+            if !use_native {
                 continue;
             }
             if self.show_viewport_surface(
@@ -126,6 +126,7 @@ impl<Tab> DockArea<'_, Tab> {
                 if fade_factor != 1.0 {
                     fade_visuals(ui.visuals_mut(), fade_factor);
                 }
+                self.show_contained_floating_surfaces(ui, viewport_id, tab_viewer, state);
                 if minimized {
                     self.minimized_body(
                         ui,

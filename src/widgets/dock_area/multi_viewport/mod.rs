@@ -1,11 +1,14 @@
 //! Multi-viewport docking helpers (inspired by [egui_docking](https://github.com/Latias94/egui_docking)).
 
+mod contained_floating;
+mod drop;
 mod geometry;
 mod ghost;
+mod payload;
 
 pub use geometry::{leaf_rect_to_screen, pointer_latest_in_screen};
-
 pub use ghost::show_ghost_preview;
+pub use payload::DockDragPayload;
 
 /// Options for [`crate::DockArea::multi_viewport`] behavior.
 #[derive(Clone, Debug, PartialEq)]
@@ -16,7 +19,10 @@ pub struct MultiViewportOptions {
     pub live_tear_off: bool,
     /// Holding ALT while releasing forces tear-off even when the pointer is over a dock.
     pub detach_on_alt: bool,
+    /// Holding CTRL while tearing off spawns a contained floating panel inside the viewport (egui [`Area`]).
+    pub tear_off_to_floating_on_ctrl: bool,
     /// Holding CTRL while tearing off creates an embedded [`egui::Window`] instead of a native viewport.
+    /// Ignored when [`Self::tear_off_to_floating_on_ctrl`] handles the tear-off first.
     pub contained_window_on_ctrl: bool,
     /// When `true`, holding SHIFT disables docking targets while dragging (ImGui `ConfigDockingWithShift=false`).
     pub disable_docking_while_shift: bool,
@@ -28,7 +34,8 @@ impl Default for MultiViewportOptions {
             ghost_preview: true,
             live_tear_off: false,
             detach_on_alt: true,
-            contained_window_on_ctrl: true,
+            tear_off_to_floating_on_ctrl: true,
+            contained_window_on_ctrl: false,
             disable_docking_while_shift: false,
         }
     }

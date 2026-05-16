@@ -17,10 +17,16 @@ pub mod translations;
 /// Window states which tells floating tabs how to be displayed inside their window,
 pub mod window_state;
 
+#[cfg(feature = "serde")]
+pub mod persistence;
+
 pub use surface::Surface;
 pub use surface_index::SurfaceIndex;
 use tree::node::LeafNode;
 pub use window_state::WindowState;
+
+#[cfg(feature = "serde")]
+pub use persistence::{DockLayoutError, DockLayoutFile, DOCK_LAYOUT_VERSION};
 
 use crate::{
     Node, NodeIndex, NodePath, Split, TabDestination, TabIndex, TabInsert, TabPath, Translations,
@@ -474,7 +480,7 @@ impl<Tab> DockState<Tab> {
     ///
     /// # Panics
     /// If `index` is not a valid `SurfaceIndex`
-    fn ensure_tree(&mut self, index: SurfaceIndex) {
+    pub(crate) fn ensure_tree(&mut self, index: SurfaceIndex) {
         if matches!(self.surfaces[index.0], Surface::Empty) {
             self.surfaces[index.0] = if index == SurfaceIndex::main() {
                 Surface::Main(Tree::new(vec![]))

@@ -337,15 +337,19 @@ impl<Tab> DockArea<'_, Tab> {
                             .ctx()
                             .transform_layer_shapes(layer_id, TSTransform::new(delta, 1.0));
 
+                        let tab_path = (path, tab_index).into();
                         tabs_ui.memory_mut(|mem| {
                             mem.data.insert_temp(
                                 self.id.with("drag_data"),
                                 Some(DragData {
-                                    src: TreeComponent::Tab((path, tab_index).into()),
+                                    src: TreeComponent::Tab(tab_path),
                                     rect: self.dock_state[path].rect().unwrap(),
                                 }),
                             );
                         });
+                        if self.multi_viewport {
+                            self.sync_drag_payload_from_tab_drag(tabs_ui.ctx(), tab_path);
+                        }
                     }
                 }
 

@@ -11,7 +11,7 @@ mod state;
 mod tab_removal;
 
 pub use allowed_splits::AllowedSplits;
-pub use multi_viewport::MultiViewportOptions;
+pub use multi_viewport::{DockDragPayload, MultiViewportOptions};
 use egui::{emath::*, Id, Modifiers};
 use tab_removal::TabRemoval;
 

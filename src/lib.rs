@@ -261,7 +261,9 @@ pub use style::*;
 pub use translations::*;
 pub use tree::*;
 pub use widgets::*;
-pub use widgets::dock_area::MultiViewportOptions;
+pub use widgets::dock_area::{DockDragPayload, MultiViewportOptions};
+#[cfg(feature = "serde")]
+pub use dock_state::{DockLayoutError, DockLayoutFile, DOCK_LAYOUT_VERSION};
 
 /// The main structure of the library.
 pub mod dock_state;

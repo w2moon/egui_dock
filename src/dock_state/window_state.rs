@@ -32,6 +32,12 @@ pub struct WindowState {
 
     /// When `false`, the surface is shown as an embedded [`egui::Window`] even if multi-viewport is enabled.
     native_viewport: bool,
+
+    /// When `true`, the surface is drawn as an [`egui::Area`] inside its parent viewport (CTRL tear-off).
+    floating_in_viewport: bool,
+
+    /// Position inside the parent viewport (for [`Self::floating_in_viewport`]).
+    viewport_local_position: Option<Pos2>,
 }
 
 impl Default for WindowState {
@@ -45,6 +51,8 @@ impl Default for WindowState {
             new: true,
             minimized: false,
             native_viewport: true,
+            floating_in_viewport: false,
+            viewport_local_position: None,
         }
     }
 }
@@ -95,6 +103,38 @@ impl WindowState {
     pub fn set_native_viewport(&mut self, native: bool) -> &mut Self {
         self.native_viewport = native;
         self
+    }
+
+    /// Show as a contained floating panel inside the parent viewport (not native, not [`egui::Window`]).
+    pub fn set_floating_in_viewport(&mut self, floating: bool) -> &mut Self {
+        self.floating_in_viewport = floating;
+        if floating {
+            self.native_viewport = false;
+        }
+        self
+    }
+
+    pub(crate) fn is_floating_in_viewport(&self) -> bool {
+        self.floating_in_viewport
+    }
+
+    /// Position of the floating panel inside its parent viewport.
+    pub fn set_viewport_local_position(&mut self, position: Pos2) -> &mut Self {
+        self.viewport_local_position = Some(position);
+        self
+    }
+
+    pub(crate) fn viewport_local_position_or(&self, default: Pos2) -> Pos2 {
+        self.viewport_local_position.unwrap_or(default)
+    }
+
+    pub(crate) fn set_viewport_local_position_persist(&mut self, position: Pos2) {
+        self.viewport_local_position = Some(position);
+    }
+
+    pub(crate) fn floating_size_hint(&self) -> Vec2 {
+        self.next_size
+            .unwrap_or_else(|| self.screen_rect.map(|r| r.size()).unwrap_or(Vec2::new(320.0, 240.0)))
     }
 
     /// Set the height of this window when it is expanded.

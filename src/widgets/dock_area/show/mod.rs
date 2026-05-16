@@ -106,14 +106,19 @@ impl<Tab> DockArea<'_, Tab> {
                 if surface_index.is_main() {
                     continue;
                 }
-                let native = self
-                    .dock_state
-                    .get_window_state(surface_index)
-                    .is_some_and(|ws| ws.uses_native_viewport());
-                if !native {
+                let ws = self.dock_state.get_window_state(surface_index);
+                let native = ws.is_some_and(|ws| ws.uses_native_viewport());
+                let floating = ws.is_some_and(|ws| ws.is_floating_in_viewport());
+                if !native && !floating {
                     self.show_window_surface(ui, surface_index, tab_viewer, &mut state, fade_arg);
                 }
             }
+            self.show_contained_floating_surfaces(
+                ui,
+                egui::ViewportId::ROOT,
+                tab_viewer,
+                &mut state,
+            );
             self.show_viewport_surfaces(&ctx, tab_viewer, &mut state, fade_arg);
         }
 
@@ -260,6 +265,13 @@ impl<Tab> DockArea<'_, Tab> {
             )
         });
 
+        let mut hover_data = hover_data;
+        if hover_data.is_none() {
+            if let Some(pointer_screen) = pointer_latest_in_screen(ctx) {
+                hover_data = self.resolve_hover_for_cross_viewport(ctx, state, pointer_screen);
+            }
+        }
+
         if let (Some(source), Some(hover)) = (drag_data, hover_data) {
             let style = self.style.as_ref().unwrap();
             state.set_drag_and_drop(source, hover, ctx, style);
@@ -269,8 +281,11 @@ impl<Tab> DockArea<'_, Tab> {
             self.try_live_tear_off(ctx, state, tab_viewer);
         }
 
+        let payload_active = super::multi_viewport::DockDragPayload::get(ctx).is_some();
+
         if state.dnd.is_some() {
             let tab_dst = self.show_drag_drop_overlay(ui, state, tab_viewer, true);
+
             if ctx.input(|i| i.pointer.any_released()) {
                 let mut destination = tab_dst;
                 if self.multi_viewport_options.detach_on_alt && ctx.input(|i| i.modifiers.alt) {
@@ -285,13 +300,25 @@ impl<Tab> DockArea<'_, Tab> {
                         }
                     }
                 }
-                self.apply_tab_drop(destination, state, tab_viewer, ctx);
+
+                if state.dnd.is_some() {
+                    self.apply_tab_drop(destination, state, tab_viewer, ctx);
+                    self.clear_drag_payload_if_ours(ctx);
+                } else {
+                    self.apply_cross_viewport_drop(ctx, destination);
+                }
             }
 
             if self.multi_viewport_options.ghost_preview {
                 if let Some(title) = self.dragged_tab_title(state, tab_viewer) {
                     show_ghost_preview(&self, ctx, state, title);
                 }
+            }
+        } else if payload_active {
+            if ctx.input(|i| i.pointer.any_released()) {
+                let destination =
+                    self.resolve_cross_viewport_drop_destination(ctx, state);
+                self.apply_cross_viewport_drop(ctx, destination);
             }
         }
 
@@ -304,7 +331,7 @@ impl<Tab> DockArea<'_, Tab> {
         &mut self,
         destination: Option<TabDestination>,
         state: &mut State,
-        _tab_viewer: &mut impl TabViewer<Tab = Tab>,
+        tab_viewer: &mut impl TabViewer<Tab = Tab>,
         ctx: &Context,
     ) {
         let Some(destination) = destination else {
@@ -316,6 +343,13 @@ impl<Tab> DockArea<'_, Tab> {
         };
 
         if let TabDestination::Window(_) = destination {
+            if self.multi_viewport_options.tear_off_to_floating_on_ctrl
+                && ctx.input(|i| i.modifiers.ctrl)
+            {
+                self.tear_off_to_floating_panel(ctx, source);
+                let _ = tab_viewer;
+                return;
+            }
             let use_contained = self.multi_viewport_options.contained_window_on_ctrl
                 && ctx.input(|i| i.modifiers.ctrl);
             if use_contained {
@@ -473,7 +507,7 @@ impl<Tab> DockArea<'_, Tab> {
         }
     }
 
-    fn render_nodes(
+    pub(super) fn render_nodes(
         &mut self,
         ui: &mut Ui,
         tab_viewer: &mut impl TabViewer<Tab = Tab>,

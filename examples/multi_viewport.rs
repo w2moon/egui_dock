@@ -33,9 +33,9 @@ impl egui_dock::TabViewer for TabViewer {
             ui.label("拖出停靠区外松开 → 原生 OS 窗口");
             ui.label("拖回任意窗口的停靠区 → 合并");
             ui.separator();
-            ui.label("SHIFT：按住时禁用停靠目标（仅拆出）");
+            ui.label("SHIFT：按住时禁用停靠目标（仅拆出新窗口）");
             ui.label("ALT：任意位置松开强制拆出");
-            ui.label("CTRL：拆出为嵌入式 egui::Window（非原生）");
+            ui.label("CTRL：拆出为当前视口内的浮动面板（可拖动标题栏）");
         });
     }
 

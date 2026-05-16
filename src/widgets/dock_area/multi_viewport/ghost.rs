@@ -98,9 +98,14 @@ impl<Tab> DockArea<'_, Tab> {
 
         let size = dnd.drag.rect.size();
         let window_rect = egui::Rect::from_min_size(pointer_screen, size);
+        let ctrl = ctx.input(|i| i.modifiers.ctrl);
+        if ctrl && self.multi_viewport_options.tear_off_to_floating_on_ctrl {
+            self.tear_off_to_floating_panel(ctx, src);
+            return;
+        }
+
         let use_native = self.multi_viewport
-            && !(self.multi_viewport_options.contained_window_on_ctrl
-                && ctx.input(|i| i.modifiers.ctrl));
+            && !(ctrl && self.multi_viewport_options.contained_window_on_ctrl);
 
         let new_surface = if use_native {
             self.dock_state.detach_tab(src, window_rect)
