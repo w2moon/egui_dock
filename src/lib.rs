@@ -157,6 +157,7 @@
 //! # egui::CentralPanel::default().show(ctx, |ui| {
 //! DockArea::new(&mut dock_state)
 //!     .multi_viewport(true)
+//!     .multi_viewport_options(egui_dock::MultiViewportOptions::default())
 //!     .show_inside(ui, &mut MyTabViewer);
 //! # });
 //! # });
@@ -260,6 +261,7 @@ pub use style::*;
 pub use translations::*;
 pub use tree::*;
 pub use widgets::*;
+pub use widgets::dock_area::MultiViewportOptions;
 
 /// The main structure of the library.
 pub mod dock_state;

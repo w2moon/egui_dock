@@ -163,6 +163,37 @@ impl<Tab> DockState<Tab> {
         }
     }
 
+    /// Persists native viewport geometry into each [`WindowState`] (for layout save).
+    pub fn capture_window_geometry_from_viewports(
+        &mut self,
+        ctx: &egui::Context,
+        dock_area_id: egui::Id,
+    ) {
+        for index in 0..self.surfaces.len() {
+            let surface_index = SurfaceIndex(index);
+            if surface_index.is_main() {
+                continue;
+            }
+            let Some(window_state) = self.get_window_state_mut(surface_index) else {
+                continue;
+            };
+            if !window_state.uses_native_viewport() {
+                continue;
+            }
+            let viewport_id = WindowState::viewport_id(dock_area_id, surface_index);
+            let outer = ctx.input(|i| {
+                i.raw
+                    .viewports
+                    .get(&viewport_id)
+                    .and_then(|v| v.outer_rect)
+            });
+            if let Some(outer) = outer {
+                window_state.set_position(outer.min);
+                window_state.set_size(outer.size());
+            }
+        }
+    }
+
     /// Returns the viewport [`Rect`] and the `Tab` inside the focused leaf node or `None` if no node is in focus.
     #[inline]
     pub fn find_active_focused(&mut self) -> Option<(Rect, &mut Tab)> {

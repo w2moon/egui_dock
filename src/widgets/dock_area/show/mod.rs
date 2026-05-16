@@ -5,7 +5,12 @@ use egui::{
 };
 use paste::paste;
 
-use super::{drag_and_drop::TreeComponent, state::State, tab_removal::TabRemoval};
+use super::{
+    drag_and_drop::TreeComponent,
+    multi_viewport::{pointer_latest_in_screen, show_ghost_preview},
+    state::State,
+    tab_removal::TabRemoval,
+};
 use crate::dock_area::tab_removal::ForcedRemoval;
 use crate::tab_viewer::OnCloseResponse;
 use crate::NodePath;
@@ -52,45 +57,20 @@ impl<Tab> DockArea<'_, Tab> {
     ///
     /// See also [`show`](Self::show).
     pub fn show_inside(mut self, ui: &mut Ui, tab_viewer: &mut impl TabViewer<Tab = Tab>) {
+        let ctx = ui.ctx().clone();
         self.style
             .get_or_insert(Style::from_egui(ui.style().as_ref()));
-        self.window_bounds.get_or_insert(ui.ctx().content_rect());
+        self.window_bounds.get_or_insert(ctx.content_rect());
 
-        let mut state = State::load(ui.ctx(), self.id);
+        let mut state = State::load(&ctx, self.id);
+        state.clear_dock_rects_screen();
 
-        // Delay hover position one frame. On touch screens hover_pos() is None when any_released()
-        if !ui.input(|i| i.pointer.any_released()) {
-            state.last_hover_pos = ui.input(|i| i.pointer.hover_pos());
-        }
-
-        let (drag_data, hover_data) = ui.memory_mut(|mem| {
-            (
-                mem.data.remove_temp(self.id.with("drag_data")).flatten(),
-                mem.data.remove_temp(self.id.with("hover_data")).flatten(),
-            )
-        });
-
-        if let (Some(source), Some(hover)) = (drag_data, hover_data) {
-            let style = self.style.as_ref().unwrap();
-            state.set_drag_and_drop(source, hover, ui.ctx(), style);
-            let tab_dst = self.show_drag_drop_overlay(ui, &mut state, tab_viewer);
-            if ui.input(|i| i.pointer.primary_released()) {
-                if let Some(destination) = tab_dst {
-                    let source = {
-                        match state.dnd.as_ref().unwrap().drag.src {
-                            TreeComponent::Tab(src) => src,
-                            _ => todo!(
-                                "collections of tabs, like nodes and surfaces can't be docked (yet)"
-                            ),
-                        }
-                    };
-                    self.dock_state.move_tab(source, destination);
-                }
+        if self.multi_viewport {
+            if !ctx.input(|i| i.pointer.any_released()) {
+                state.last_hover_pos = ctx.pointer_latest_pos();
             }
-        }
-
-        if ui.input(|i| i.pointer.primary_released()) {
-            state.reset_drag();
+        } else if !ui.input(|i| i.pointer.any_released()) {
+            state.last_hover_pos = ui.input(|i| i.pointer.hover_pos());
         }
 
         let style = self.style.as_ref().unwrap();
@@ -122,7 +102,30 @@ impl<Tab> DockArea<'_, Tab> {
         }
 
         if self.multi_viewport {
-            self.show_viewport_surfaces(ui.ctx(), tab_viewer, &mut state, fade_arg);
+            for &surface_index in self.dock_state.valid_surface_indices().iter() {
+                if surface_index.is_main() {
+                    continue;
+                }
+                let native = self
+                    .dock_state
+                    .get_window_state(surface_index)
+                    .is_some_and(|ws| ws.uses_native_viewport());
+                if !native {
+                    self.show_window_surface(ui, surface_index, tab_viewer, &mut state, fade_arg);
+                }
+            }
+            self.show_viewport_surfaces(&ctx, tab_viewer, &mut state, fade_arg);
+        }
+
+        if self.multi_viewport {
+            self.process_multi_viewport_drag_drop(&ctx, ui, &mut state, tab_viewer);
+        } else {
+            self.process_embedded_drag_drop(ui, &mut state, tab_viewer);
+        }
+
+        if self.multi_viewport {
+            self.dock_state
+                .capture_window_geometry_from_viewports(&ctx, self.id);
         }
 
         for removal in self.to_remove.drain(..).rev() {
@@ -185,8 +188,12 @@ impl<Tab> DockArea<'_, Tab> {
         }
 
         for path in self.to_detach.drain(..).rev() {
-            let mouse_pos = state.last_hover_pos;
-            self.dock_state.detach_tab(
+            let mouse_pos = if self.multi_viewport {
+                pointer_latest_in_screen(&ctx).or(state.last_hover_pos)
+            } else {
+                state.last_hover_pos
+            };
+            let surface = self.dock_state.detach_tab(
                 path,
                 Rect::from_min_size(
                     mouse_pos.unwrap_or(Pos2::ZERO),
@@ -195,13 +202,154 @@ impl<Tab> DockArea<'_, Tab> {
                         .map_or(Vec2::new(100., 150.), |rect| rect.size()),
                 ),
             );
+            if self.multi_viewport
+                && self.multi_viewport_options.contained_window_on_ctrl
+                && ctx.input(|i| i.modifiers.ctrl)
+            {
+                if let Some(ws) = self.dock_state.get_window_state_mut(surface) {
+                    ws.set_native_viewport(false);
+                }
+            }
         }
 
         if let Some(focused) = self.new_focused {
             self.dock_state.set_focused_node_and_surface(focused);
         }
 
-        state.store(ui.ctx(), self.id);
+        state.store(&ctx, self.id);
+    }
+
+    fn process_embedded_drag_drop(
+        &mut self,
+        ui: &mut Ui,
+        state: &mut State,
+        tab_viewer: &mut impl TabViewer<Tab = Tab>,
+    ) {
+        let (drag_data, hover_data) = ui.memory_mut(|mem| {
+            (
+                mem.data.remove_temp(self.id.with("drag_data")).flatten(),
+                mem.data.remove_temp(self.id.with("hover_data")).flatten(),
+            )
+        });
+
+        if let (Some(source), Some(hover)) = (drag_data, hover_data) {
+            let style = self.style.as_ref().unwrap();
+            state.set_drag_and_drop(source, hover, ui.ctx(), style);
+            let tab_dst = self.show_drag_drop_overlay(ui, state, tab_viewer, false);
+            if ui.input(|i| i.pointer.primary_released()) {
+                self.apply_tab_drop(tab_dst, state, tab_viewer, ui.ctx());
+            }
+        }
+
+        if ui.input(|i| i.pointer.primary_released()) {
+            state.reset_drag();
+        }
+    }
+
+    fn process_multi_viewport_drag_drop(
+        &mut self,
+        ctx: &Context,
+        ui: &mut Ui,
+        state: &mut State,
+        tab_viewer: &mut impl TabViewer<Tab = Tab>,
+    ) {
+        let (drag_data, hover_data) = ui.memory_mut(|mem| {
+            (
+                mem.data.remove_temp(self.id.with("drag_data")).flatten(),
+                mem.data.remove_temp(self.id.with("hover_data")).flatten(),
+            )
+        });
+
+        if let (Some(source), Some(hover)) = (drag_data, hover_data) {
+            let style = self.style.as_ref().unwrap();
+            state.set_drag_and_drop(source, hover, ctx, style);
+        }
+
+        if self.multi_viewport_options.live_tear_off {
+            self.try_live_tear_off(ctx, state, tab_viewer);
+        }
+
+        if state.dnd.is_some() {
+            let tab_dst = self.show_drag_drop_overlay(ui, state, tab_viewer, true);
+            if ctx.input(|i| i.pointer.any_released()) {
+                let mut destination = tab_dst;
+                if self.multi_viewport_options.detach_on_alt && ctx.input(|i| i.modifiers.alt) {
+                    if let Some(dnd) = state.dnd.as_ref() {
+                        if let TreeComponent::Tab(_) = dnd.drag.src {
+                            let pointer =
+                                pointer_latest_in_screen(ctx).unwrap_or(dnd.pointer);
+                            destination = Some(TabDestination::Window(Rect::from_min_size(
+                                pointer,
+                                dnd.drag.rect.size(),
+                            )));
+                        }
+                    }
+                }
+                self.apply_tab_drop(destination, state, tab_viewer, ctx);
+            }
+
+            if self.multi_viewport_options.ghost_preview {
+                if let Some(title) = self.dragged_tab_title(state, tab_viewer) {
+                    show_ghost_preview(&self, ctx, state, title);
+                }
+            }
+        }
+
+        if ctx.input(|i| i.pointer.any_released()) {
+            state.reset_drag();
+        }
+    }
+
+    fn apply_tab_drop(
+        &mut self,
+        destination: Option<TabDestination>,
+        state: &mut State,
+        _tab_viewer: &mut impl TabViewer<Tab = Tab>,
+        ctx: &Context,
+    ) {
+        let Some(destination) = destination else {
+            return;
+        };
+        let source = match state.dnd.as_ref().unwrap().drag.src {
+            TreeComponent::Tab(src) => src,
+            _ => todo!("collections of tabs, like nodes and surfaces can't be docked (yet)"),
+        };
+
+        if let TabDestination::Window(_) = destination {
+            let use_contained = self.multi_viewport_options.contained_window_on_ctrl
+                && ctx.input(|i| i.modifiers.ctrl);
+            if use_contained {
+                let pointer = pointer_latest_in_screen(ctx).unwrap_or(Pos2::ZERO);
+                let size = state
+                    .dnd
+                    .as_ref()
+                    .map(|d| d.drag.rect.size())
+                    .unwrap_or_else(|| Vec2::new(320.0, 240.0));
+                let surface = self.dock_state.detach_tab(
+                    source,
+                    Rect::from_min_size(pointer, size),
+                );
+                if let Some(ws) = self.dock_state.get_window_state_mut(surface) {
+                    ws.set_native_viewport(false);
+                }
+                return;
+            }
+        }
+
+        self.dock_state.move_tab(source, destination);
+    }
+
+    fn dragged_tab_title(
+        &mut self,
+        state: &State,
+        tab_viewer: &mut impl TabViewer<Tab = Tab>,
+    ) -> Option<egui::WidgetText> {
+        let dnd = state.dnd.as_ref()?;
+        let TreeComponent::Tab(path) = dnd.drag.src else {
+            return None;
+        };
+        let leaf = self.dock_state[path.node_path()].get_leaf_mut()?;
+        Some(tab_viewer.title(&mut leaf.tabs[path.tab.0]))
     }
 
     /// Returns some when windows are fading, and what surface index is being hovered over
@@ -231,6 +379,7 @@ impl<Tab> DockArea<'_, Tab> {
         ui: &Ui,
         state: &mut State,
         tab_viewer: &impl TabViewer<Tab = Tab>,
+        use_global_pointer: bool,
     ) -> Option<TabDestination> {
         let drag_state = state.dnd.as_mut().unwrap();
         let style = self.style.as_ref().unwrap();
@@ -272,20 +421,38 @@ impl<Tab> DockArea<'_, Tab> {
         }
 
         let window_bounds = self.window_bounds.unwrap();
+        let ctx = ui.ctx();
+        let overlay_id = self.id.with("dnd_overlay");
+        let pointer_screen = if use_global_pointer {
+            pointer_latest_in_screen(ctx)
+        } else {
+            None
+        };
+        let shift_held = ctx.input(|i| i.modifiers.shift);
+        let docking_allowed = !(self.multi_viewport_options.disable_docking_while_shift
+            && shift_held);
+
         match (style.overlay.overlay_type, drag_state.is_on_title_bar()) {
-            (OverlayType::HighlightedAreas, _) | (_, true) => drag_state.resolve_traditional(
-                ui,
+            (OverlayType::HighlightedAreas, _) | (_, true) => drag_state.resolve_traditional_ctx(
+                ctx,
+                overlay_id,
                 style,
                 allowed_splits,
                 allowed_in_window,
                 window_bounds,
+                docking_allowed,
+                pointer_screen,
             ),
-            (OverlayType::Widgets, false) => drag_state.resolve_icon_based(
+            (OverlayType::Widgets, false) => drag_state.resolve_icon_based_ctx(
+                ctx,
                 ui,
+                overlay_id,
                 style,
                 allowed_splits,
                 allowed_in_window,
                 window_bounds,
+                docking_allowed,
+                pointer_screen,
             ),
         }
     }

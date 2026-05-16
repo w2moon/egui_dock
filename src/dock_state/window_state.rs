@@ -29,6 +29,9 @@ pub struct WindowState {
 
     /// True if the window is minimized
     minimized: bool,
+
+    /// When `false`, the surface is shown as an embedded [`egui::Window`] even if multi-viewport is enabled.
+    native_viewport: bool,
 }
 
 impl Default for WindowState {
@@ -41,6 +44,7 @@ impl Default for WindowState {
             expanded_height: None,
             new: true,
             minimized: false,
+            native_viewport: true,
         }
     }
 }
@@ -80,6 +84,17 @@ impl WindowState {
     /// Returns if this window is currently being dragged or not.
     pub fn dragged(&self) -> bool {
         self.dragged
+    }
+
+    /// Whether this detached surface is hosted in a native OS viewport.
+    pub fn uses_native_viewport(&self) -> bool {
+        self.native_viewport
+    }
+
+    /// Use a native OS viewport (`true`) or an embedded [`egui::Window`] (`false`) for this surface.
+    pub fn set_native_viewport(&mut self, native: bool) -> &mut Self {
+        self.native_viewport = native;
+        self
     }
 
     /// Set the height of this window when it is expanded.

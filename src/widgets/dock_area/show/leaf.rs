@@ -1160,7 +1160,7 @@ impl<Tab> DockArea<'_, Tab> {
     fn tab_body(
         &mut self,
         ui: &mut Ui,
-        state: &State,
+        state: &mut State,
         path: NodePath,
         tab_viewer: &mut impl TabViewer<Tab = Tab>,
         spacing: Vec2,
@@ -1258,6 +1258,16 @@ impl<Tab> DockArea<'_, Tab> {
                         });
                 });
             }
+        }
+
+        if let Some(screen_rect) = super::super::multi_viewport::leaf_rect_to_screen(
+            ui.ctx(),
+            self.id,
+            path.surface,
+            *rect,
+        )
+        {
+            state.push_dock_rect_screen(path.surface, screen_rect);
         }
 
         // change hover destination

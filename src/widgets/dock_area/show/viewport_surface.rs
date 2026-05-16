@@ -30,6 +30,13 @@ impl<Tab> DockArea<'_, Tab> {
         let mut surfaces_to_close = Vec::new();
 
         for surf_index in surface_indices {
+            let native = self
+                .dock_state
+                .get_window_state(surf_index)
+                .is_some_and(|ws| ws.uses_native_viewport());
+            if !native {
+                continue;
+            }
             if self.show_viewport_surface(
                 ctx,
                 surf_index,

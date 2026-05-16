@@ -69,13 +69,16 @@ impl TreeComponent {
 }
 
 fn make_overlay_painter(ui: &Ui) -> Painter {
-    let id = Id::new("overlay");
-    let layer_id = LayerId::new(Order::Foreground, id);
-    ui.ctx().layer_painter(layer_id)
+    make_overlay_painter_ctx(ui.ctx(), Id::new("overlay"))
 }
 
-fn draw_highlight_rect(rect: Rect, ui: &Ui, style: &Style) {
-    let painter = make_overlay_painter(ui);
+fn make_overlay_painter_ctx(ctx: &Context, overlay_id: Id) -> Painter {
+    let layer_id = LayerId::new(Order::Foreground, overlay_id);
+    ctx.layer_painter(layer_id)
+}
+
+fn draw_highlight_rect_ctx(rect: Rect, ctx: &Context, overlay_id: Id, style: &Style) {
+    let painter = make_overlay_painter_ctx(ctx, overlay_id);
     painter.rect(
         rect.expand(style.overlay.hovered_leaf_highlight.expansion),
         style.overlay.hovered_leaf_highlight.corner_radius,
@@ -172,66 +175,82 @@ impl DragDropState {
         self.hover.tab.is_some()
     }
 
-    pub(super) fn resolve_icon_based(
+    pub(super) fn resolve_icon_based_ctx(
         &mut self,
+        ctx: &Context,
         ui: &Ui,
+        overlay_id: Id,
         style: &Style,
         allowed_splits: AllowedSplits,
         windows_allowed: bool,
         window_bounds: Rect,
+        docking_allowed: bool,
+        pointer_screen: Option<Pos2>,
     ) -> Option<TabDestination> {
         assert!(!self.is_on_title_bar());
 
-        draw_highlight_rect(self.hover.rect, ui, style);
+        draw_highlight_rect_ctx(self.hover.rect, ctx, overlay_id, style);
         let mut hovering_buttons = false;
         let total_button_spacing = style.overlay.button_spacing * 2.0;
-        let (rect, pointer) = (self.hover.rect, self.pointer);
+        let pointer_local = self.pointer;
+        let pointer_for_window = pointer_screen.unwrap_or(pointer_local);
+        let (rect, pointer) = (self.hover.rect, pointer_local);
         let rect = rect.shrink(style.overlay.button_spacing);
         let shortest_side = ((rect.width() - total_button_spacing) / 3.0)
             .min((rect.height() - total_button_spacing) / 3.0)
             .min(style.overlay.max_button_size);
 
-        let mut destination: Option<TabDestination> = windows_allowed
-            .then(|| TabDestination::Window(Rect::from_min_size(pointer, self.drag.rect.size())));
+        let mut destination: Option<TabDestination> = windows_allowed.then(|| {
+            TabDestination::Window(Rect::from_min_size(
+                pointer_for_window,
+                self.drag.rect.size(),
+            ))
+        });
 
         let center = rect.center();
         let rect = Rect::from_center_size(center, Vec2::splat(shortest_side));
 
-        if button_ui(rect, ui, &mut hovering_buttons, pointer, style, None) {
-            match self.hover.dst {
-                TreeComponent::Node(path) => {
-                    destination = Some(TabDestination::Node(path, TabInsert::Append))
+        if docking_allowed {
+            if button_ui(rect, ui, &mut hovering_buttons, pointer, style, None) {
+                match self.hover.dst {
+                    TreeComponent::Node(path) => {
+                        destination = Some(TabDestination::Node(path, TabInsert::Append))
+                    }
+                    TreeComponent::Surface(surface) => {
+                        destination = Some(TabDestination::EmptySurface(surface))
+                    }
+                    _ => (),
                 }
-                TreeComponent::Surface(surface) => {
-                    destination = Some(TabDestination::EmptySurface(surface))
-                }
-                _ => (),
             }
-        }
 
-        for split in [Split::Below, Split::Right, Split::Above, Split::Left] {
-            match allowed_splits {
-                AllowedSplits::TopBottomOnly if !split.is_top_bottom() => continue,
-                AllowedSplits::LeftRightOnly if !split.is_left_right() => continue,
-                AllowedSplits::None => continue,
-                _ => {
-                    let offset_value = shortest_side + style.overlay.button_spacing;
-                    let offset_vector = match split {
-                        Split::Above => vec2(0.0, -offset_value),
-                        Split::Below => vec2(0.0, offset_value),
-                        Split::Left => vec2(-offset_value, 0.0),
-                        Split::Right => vec2(offset_value, 0.0),
-                    };
-                    if button_ui(
-                        Rect::from_center_size(center + offset_vector, Vec2::splat(shortest_side)),
-                        ui,
-                        &mut hovering_buttons,
-                        pointer,
-                        style,
-                        Some(split),
-                    ) {
-                        if let TreeComponent::Node(path) = self.hover.dst {
-                            destination = Some(TabDestination::Node(path, TabInsert::Split(split)))
+            for split in [Split::Below, Split::Right, Split::Above, Split::Left] {
+                match allowed_splits {
+                    AllowedSplits::TopBottomOnly if !split.is_top_bottom() => continue,
+                    AllowedSplits::LeftRightOnly if !split.is_left_right() => continue,
+                    AllowedSplits::None => continue,
+                    _ => {
+                        let offset_value = shortest_side + style.overlay.button_spacing;
+                        let offset_vector = match split {
+                            Split::Above => vec2(0.0, -offset_value),
+                            Split::Below => vec2(0.0, offset_value),
+                            Split::Left => vec2(-offset_value, 0.0),
+                            Split::Right => vec2(offset_value, 0.0),
+                        };
+                        if button_ui(
+                            Rect::from_center_size(
+                                center + offset_vector,
+                                Vec2::splat(shortest_side),
+                            ),
+                            ui,
+                            &mut hovering_buttons,
+                            pointer,
+                            style,
+                            Some(split),
+                        ) {
+                            if let TreeComponent::Node(path) = self.hover.dst {
+                                destination =
+                                    Some(TabDestination::Node(path, TabInsert::Split(split)))
+                            }
                         }
                     }
                 }
@@ -243,43 +262,58 @@ impl DragDropState {
             (_, true) => LockState::HardLock,
             (true, _) => LockState::SoftLock,
         };
-        self.update_lock(target_lock_state, style, ui.ctx());
+        self.update_lock(target_lock_state, style, ctx);
         if let Some(TabDestination::Window(rect)) = destination {
             let rect = self.window_preview_rect(rect);
-            let rect_bounded = constrain_rect_to_area(ui, rect, window_bounds);
-            draw_window_rect(rect_bounded, ui, style);
+            let rect_bounded = constrain_rect_to_screen(ctx, rect, window_bounds);
+            draw_window_rect_ctx(rect_bounded, ctx, overlay_id, style);
         }
         destination
     }
 
-    pub(super) fn resolve_traditional(
+    pub(super) fn resolve_traditional_ctx(
         &mut self,
-        ui: &Ui,
+        ctx: &Context,
+        overlay_id: Id,
         style: &Style,
         allowed_splits: AllowedSplits,
         windows_allowed: bool,
         window_bounds: Rect,
+        docking_allowed: bool,
+        pointer_screen: Option<Pos2>,
     ) -> Option<TabDestination> {
         // If windows are not allowed, any hover over a window is immediately disallowed.
         if !windows_allowed && self.hover.dst.surface_address() != SurfaceIndex::main() {
             return None;
         }
-        draw_highlight_rect(self.hover.rect, ui, style);
+        draw_highlight_rect_ctx(self.hover.rect, ctx, overlay_id, style);
 
         // Deals with hovers over tab bar and tab titles.
+        let pointer_local = self.pointer;
+        let pointer_for_window = pointer_screen.unwrap_or(pointer_local);
+
         if let Some(rect) = self.hover.tab {
-            draw_drop_rect(rect, ui, style);
-            let target_lock_state = if rect.contains(self.pointer) {
+            draw_drop_rect_ctx(rect, ctx, overlay_id, style);
+            let target_lock_state = if rect.contains(pointer_local) {
                 LockState::SoftLock
             } else {
                 LockState::Unlocked
             };
-            self.update_lock(target_lock_state, style, ui.ctx());
+            self.update_lock(target_lock_state, style, ctx);
             return Some(self.hover.dst.as_tab_destination());
         }
 
+        if !docking_allowed {
+            return windows_allowed.then(|| {
+                TabDestination::Window(Rect::from_min_size(
+                    pointer_for_window,
+                    self.drag.rect.size(),
+                ))
+            });
+        }
+
         // Main cases, splits, window creations, etc.
-        let (hover_rect, pointer) = (self.hover.rect, self.pointer);
+        let (hover_rect, pointer) = (self.hover.rect, pointer_local);
         let center = hover_rect.center();
 
         let (tab_insertion, overlay_rect) = {
@@ -345,25 +379,29 @@ impl DragDropState {
             }
         };
 
-        let default_value = windows_allowed
-            .then(|| TabDestination::Window(Rect::from_min_size(pointer, self.drag.rect.size())));
+        let default_value = windows_allowed.then(|| {
+            TabDestination::Window(Rect::from_min_size(
+                pointer_for_window,
+                self.drag.rect.size(),
+            ))
+        });
         let final_result = tab_insertion.map_or(default_value, |tab| match self.hover.dst {
             TreeComponent::Surface(surface) => Some(TabDestination::EmptySurface(surface)),
             TreeComponent::Node(path) => Some(TabDestination::Node(path, tab)),
             _ => None,
         });
 
-        self.update_lock(LockState::SoftLock, style, ui.ctx());
+        self.update_lock(LockState::SoftLock, style, ctx);
 
         // Draw the overlay
         match final_result {
             Some(TabDestination::Window(rect)) => {
                 let rect = self.window_preview_rect(rect);
-                let rect_bounded = constrain_rect_to_area(ui, rect, window_bounds);
-                draw_window_rect(rect_bounded, ui, style);
+                let rect_bounded = constrain_rect_to_screen(ctx, rect, window_bounds);
+                draw_window_rect_ctx(rect_bounded, ctx, overlay_id, style);
             }
             Some(_) => {
-                draw_drop_rect(hover_rect.intersect(overlay_rect), ui, style);
+                draw_drop_rect_ctx(hover_rect.intersect(overlay_rect), ctx, overlay_id, style);
             }
             None => (),
         }
@@ -426,15 +464,13 @@ const fn lerp_vec(split: Split, alpha: f32) -> Vec2 {
 
 // Draws a filled rect describing where a tab will be dropped.
 #[inline(always)]
-fn draw_drop_rect(rect: Rect, ui: &Ui, style: &Style) {
-    let painter = make_overlay_painter(ui);
+fn draw_drop_rect_ctx(rect: Rect, ctx: &Context, overlay_id: Id, style: &Style) {
+    let painter = make_overlay_painter_ctx(ctx, overlay_id);
     painter.rect_filled(rect, 0.0, style.overlay.selection_color);
 }
 
-// Draws a stroked rect describing where a tab will be dropped.
-#[inline(always)]
-fn draw_window_rect(rect: Rect, ui: &Ui, style: &Style) {
-    let painter = make_overlay_painter(ui);
+fn draw_window_rect_ctx(rect: Rect, ctx: &Context, overlay_id: Id, style: &Style) {
+    let painter = make_overlay_painter_ctx(ctx, overlay_id);
     painter.rect_stroke(
         rect,
         0.0,
@@ -446,31 +482,27 @@ fn draw_window_rect(rect: Rect, ui: &Ui, style: &Style) {
     );
 }
 
-/// An adapted version of the [`egui::Area`]s code for restricting an area rect to a bound.
-fn constrain_rect_to_area(ui: &Ui, rect: Rect, mut bounds: Rect) -> Rect {
+fn constrain_rect_to_screen(ctx: &Context, rect: Rect, mut bounds: Rect) -> Rect {
     if rect.width() > bounds.width() {
-        // Allow overlapping side bars.
-        let screen_rect = ui.ctx().content_rect();
+        let screen_rect = ctx.content_rect();
         (bounds.min.x, bounds.max.x) = (screen_rect.min.x, screen_rect.max.x);
     }
     if rect.height() > bounds.height() {
-        // Allow overlapping top/bottom bars:
-        let screen_rect = ui.ctx().content_rect();
+        let screen_rect = ctx.content_rect();
         (bounds.min.y, bounds.max.y) = (screen_rect.min.y, screen_rect.max.y);
     }
 
     let mut pos = rect.min;
-
-    // Constrain to screen, unless window is too large to fit:
     let margin_x = (rect.width() - bounds.width()).at_least(0.0);
     let margin_y = (rect.height() - bounds.height()).at_least(0.0);
 
-    pos.x = pos.x.at_most(bounds.right() + margin_x - rect.width()); // move left if needed
-    pos.x = pos.x.at_least(bounds.left() - margin_x); // move right if needed
-    pos.y = pos.y.at_most(bounds.bottom() + margin_y - rect.height()); // move right if needed
-    pos.y = pos.y.at_least(bounds.top() - margin_y); // move down if needed
+    pos.x = pos.x.at_most(bounds.right() + margin_x - rect.width());
+    pos.x = pos.x.at_least(bounds.left() - margin_x);
+    pos.y = pos.y.at_most(bounds.bottom() + margin_y - rect.height());
+    pos.y = pos.y.at_least(bounds.top() - margin_y);
 
-    pos = pos.round_to_pixels(ui.painter().pixels_per_point());
+    pos = pos.round_to_pixels(ctx.pixels_per_point());
 
     Rect::from_min_size(pos, rect.size())
 }
+

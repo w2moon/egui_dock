@@ -3,7 +3,7 @@
 use eframe::{egui, NativeOptions};
 use egui::ViewportBuilder;
 use egui_dock::tab_viewer::OnCloseResponse;
-use egui_dock::{DockArea, DockState, Style};
+use egui_dock::{DockArea, DockState, MultiViewportOptions, Style};
 
 fn main() -> eframe::Result<()> {
     let options = NativeOptions {
@@ -30,8 +30,12 @@ impl egui_dock::TabViewer for TabViewer {
         ui.vertical_centered(|ui| {
             ui.heading(tab);
             ui.separator();
-            ui.label("将标签拖出停靠区边缘可拆分为原生 OS 窗口。");
-            ui.label("可将标签拖回主窗口或其他已拆分的窗口进行合并。");
+            ui.label("拖出停靠区外松开 → 原生 OS 窗口");
+            ui.label("拖回任意窗口的停靠区 → 合并");
+            ui.separator();
+            ui.label("SHIFT：按住时禁用停靠目标（仅拆出）");
+            ui.label("ALT：任意位置松开强制拆出");
+            ui.label("CTRL：拆出为嵌入式 egui::Window（非原生）");
         });
     }
 
@@ -61,6 +65,11 @@ impl eframe::App for MyApp {
         DockArea::new(&mut self.dock_state)
             .style(Style::from_egui(ui.style().as_ref()))
             .multi_viewport(true)
+            .multi_viewport_options(MultiViewportOptions {
+                ghost_preview: true,
+                live_tear_off: false,
+                ..MultiViewportOptions::default()
+            })
             .show_inside(ui, &mut TabViewer);
     }
 }

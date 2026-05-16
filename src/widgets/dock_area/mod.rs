@@ -1,6 +1,7 @@
 /// Due to there being a lot of code to show a dock in a ui every complementing
 /// method to ``show`` and ``show_inside`` is put in ``show_extra``.
 /// Otherwise ``mod.rs`` would be humongous.
+mod multi_viewport;
 mod show;
 
 // Various components of the `DockArea` which is used when rendering
@@ -10,6 +11,7 @@ mod state;
 mod tab_removal;
 
 pub use allowed_splits::AllowedSplits;
+pub use multi_viewport::MultiViewportOptions;
 use egui::{emath::*, Id, Modifiers};
 use tab_removal::TabRemoval;
 
@@ -40,6 +42,7 @@ pub struct DockArea<'tree, Tab> {
     multi_viewport: bool,
     /// Whether detached native viewports use OS window decorations (title bar, resize frame).
     native_window_decorations: bool,
+    multi_viewport_options: MultiViewportOptions,
 
     to_remove: Vec<TabRemoval>,
     to_detach: Vec<TabPath>,
@@ -70,6 +73,7 @@ impl<'tree, Tab> DockArea<'tree, Tab> {
             window_bounds: None,
             multi_viewport: false,
             native_window_decorations: true,
+            multi_viewport_options: MultiViewportOptions::default(),
             show_window_close_buttons: true,
             show_window_collapse_buttons: true,
             show_leaf_close_all_buttons: true,
@@ -197,6 +201,13 @@ impl<'tree, Tab> DockArea<'tree, Tab> {
     #[inline(always)]
     pub fn native_window_decorations(mut self, decorations: bool) -> Self {
         self.native_window_decorations = decorations;
+        self
+    }
+
+    /// Fine-grained multi-viewport behavior (ghost preview, modifiers, live tear-off).
+    #[inline(always)]
+    pub fn multi_viewport_options(mut self, options: MultiViewportOptions) -> Self {
+        self.multi_viewport_options = options;
         self
     }
 
