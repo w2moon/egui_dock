@@ -119,7 +119,7 @@ impl<Tab> DockArea<'_, Tab> {
         }
     }
 
-    fn minimized_body(
+    pub(super) fn minimized_body(
         &mut self,
         ui: &mut Ui,
         surface_index: SurfaceIndex,

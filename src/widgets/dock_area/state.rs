@@ -1,14 +1,47 @@
-use egui::{Context, Id, Pos2};
+use egui::{Context, Id, Pos2, Rect};
 
 use super::drag_and_drop::{DragData, DragDropState, HoverData};
-use crate::{Style, SurfaceIndex};
+use super::multi_viewport::{GhostDrag, MultiViewportDragState, PendingDrop};
+use crate::{NodeIndex, Style, SurfaceIndex};
 
-#[derive(Clone, Debug, Default)]
+/// Screen-space hit target for cross-viewport docking.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct DockRectHit {
+    pub surface: SurfaceIndex,
+    pub node: NodeIndex,
+    pub rect: Rect,
+}
+
+#[derive(Debug, Default)]
 pub(super) struct State {
     pub drag_start: Option<Pos2>,
     pub last_hover_pos: Option<Pos2>,
     pub dnd: Option<DragDropState>,
     pub window_fade: Option<(f64, SurfaceIndex)>,
+    /// Leaf rects in screen space, rebuilt each frame (multi-viewport).
+    pub dock_rects_screen: Vec<DockRectHit>,
+    /// Set when [`super::multi_viewport::MultiViewportOptions::live_tear_off`] detaches mid-drag.
+    pub live_tear_off_surface: Option<SurfaceIndex>,
+    /// Ghost tear-off in progress ([`super::multi_viewport::MultiViewportOptions::ghost_tear_off`]).
+    pub ghost_drag: Option<GhostDrag>,
+    pub mv_drag: MultiViewportDragState,
+    pub pending_drop: Option<PendingDrop>,
+}
+
+impl Clone for State {
+    fn clone(&self) -> Self {
+        Self {
+            drag_start: self.drag_start,
+            last_hover_pos: self.last_hover_pos,
+            dnd: self.dnd.clone(),
+            window_fade: self.window_fade,
+            dock_rects_screen: self.dock_rects_screen.clone(),
+            live_tear_off_surface: self.live_tear_off_surface,
+            ghost_drag: None,
+            mv_drag: self.mv_drag.clone(),
+            pending_drop: None,
+        }
+    }
 }
 
 impl State {
@@ -19,6 +52,11 @@ impl State {
             last_hover_pos: None,
             dnd: None,
             window_fade: None,
+            dock_rects_screen: Vec::new(),
+            live_tear_off_surface: None,
+            ghost_drag: None,
+            mv_drag: MultiViewportDragState::default(),
+            pending_drop: None,
         })
     }
 
@@ -31,6 +69,26 @@ impl State {
         self.dnd = None;
         self.window_fade = None;
         self.drag_start = None;
+        self.live_tear_off_surface = None;
+        self.ghost_drag = None;
+    }
+
+    #[inline]
+    pub(super) fn clear_dock_rects_screen(&mut self) {
+        self.dock_rects_screen.clear();
+    }
+
+    pub(super) fn push_dock_rect_screen(
+        &mut self,
+        surface: SurfaceIndex,
+        node: NodeIndex,
+        rect: Rect,
+    ) {
+        self.dock_rects_screen.push(DockRectHit {
+            surface,
+            node,
+            rect,
+        });
     }
 
     pub(super) fn set_drag_and_drop(

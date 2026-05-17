@@ -337,15 +337,18 @@ impl<Tab> DockArea<'_, Tab> {
                             .ctx()
                             .transform_layer_shapes(layer_id, TSTransform::new(delta, 1.0));
 
-                        tabs_ui.memory_mut(|mem| {
-                            mem.data.insert_temp(
-                                self.id.with("drag_data"),
-                                Some(DragData {
-                                    src: TreeComponent::Tab((path, tab_index).into()),
-                                    rect: self.dock_state[path].rect().unwrap(),
-                                }),
-                            );
-                        });
+                        let tab_path = (path, tab_index).into();
+                        super::super::drag_buffer::set_drag_data(
+                            tabs_ui.ctx(),
+                            self.id,
+                            DragData {
+                                src: TreeComponent::Tab(tab_path),
+                                rect: self.dock_state[path].rect().unwrap(),
+                            },
+                        );
+                        if self.multi_viewport {
+                            self.sync_drag_payload_from_tab_drag(tabs_ui.ctx(), tab_path);
+                        }
                     }
                 }
 
@@ -1160,7 +1163,7 @@ impl<Tab> DockArea<'_, Tab> {
     fn tab_body(
         &mut self,
         ui: &mut Ui,
-        state: &State,
+        state: &mut State,
         path: NodePath,
         tab_viewer: &mut impl TabViewer<Tab = Tab>,
         spacing: Vec2,
@@ -1260,6 +1263,16 @@ impl<Tab> DockArea<'_, Tab> {
             }
         }
 
+        if let Some(screen_rect) = super::super::multi_viewport::leaf_rect_to_screen(
+            ui.ctx(),
+            self.id,
+            path.surface,
+            *rect,
+        )
+        {
+            state.push_dock_rect_screen(path.surface, path.node, screen_rect);
+        }
+
         // change hover destination
         if let Some(pointer) = state.last_hover_pos {
             // Prevent borrow checker issues.
@@ -1303,12 +1316,11 @@ impl<Tab> DockArea<'_, Tab> {
                     }
                 };
 
-                ui.memory_mut(|mem| {
-                    mem.data.insert_temp(
-                        self.id.with("hover_data"),
-                        Some(HoverData { rect, dst, tab }),
-                    );
-                });
+                super::super::drag_buffer::set_hover_data(
+                    ui.ctx(),
+                    self.id,
+                    HoverData { rect, dst, tab },
+                );
             }
         }
     }

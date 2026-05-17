@@ -17,10 +17,16 @@ pub mod translations;
 /// Window states which tells floating tabs how to be displayed inside their window,
 pub mod window_state;
 
+#[cfg(feature = "serde")]
+pub mod persistence;
+
 pub use surface::Surface;
 pub use surface_index::SurfaceIndex;
 use tree::node::LeafNode;
 pub use window_state::WindowState;
+
+#[cfg(feature = "serde")]
+pub use persistence::{DockLayoutError, DockLayoutFile, DOCK_LAYOUT_VERSION};
 
 use crate::{
     Node, NodeIndex, NodePath, Split, TabDestination, TabIndex, TabInsert, TabPath, Translations,
@@ -160,6 +166,37 @@ impl<Tab> DockState<Tab> {
         match &self.surfaces[surface.0] {
             Surface::Window(_, state) => Some(state),
             _ => None,
+        }
+    }
+
+    /// Persists native viewport geometry into each [`WindowState`] (for layout save).
+    pub fn capture_window_geometry_from_viewports(
+        &mut self,
+        ctx: &egui::Context,
+        dock_area_id: egui::Id,
+    ) {
+        for index in 0..self.surfaces.len() {
+            let surface_index = SurfaceIndex(index);
+            if surface_index.is_main() {
+                continue;
+            }
+            let Some(window_state) = self.get_window_state_mut(surface_index) else {
+                continue;
+            };
+            if !window_state.uses_native_viewport() {
+                continue;
+            }
+            let viewport_id = WindowState::viewport_id(dock_area_id, surface_index);
+            let outer = ctx.input(|i| {
+                i.raw
+                    .viewports
+                    .get(&viewport_id)
+                    .and_then(|v| v.outer_rect)
+            });
+            if let Some(outer) = outer {
+                window_state.set_position(outer.min);
+                window_state.set_size(outer.size());
+            }
         }
     }
 
@@ -443,7 +480,7 @@ impl<Tab> DockState<Tab> {
     ///
     /// # Panics
     /// If `index` is not a valid `SurfaceIndex`
-    fn ensure_tree(&mut self, index: SurfaceIndex) {
+    pub(crate) fn ensure_tree(&mut self, index: SurfaceIndex) {
         if matches!(self.surfaces[index.0], Surface::Empty) {
             self.surfaces[index.0] = if index == SurfaceIndex::main() {
                 Surface::Main(Tree::new(vec![]))

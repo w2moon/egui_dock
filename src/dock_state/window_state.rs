@@ -1,4 +1,6 @@
-use egui::{Id, Pos2, Rect, Vec2};
+use egui::{Id, Pos2, Rect, Vec2, ViewportBuilder, ViewportId};
+
+use crate::SurfaceIndex;
 
 /// The state of a [`Surface::Window`](crate::Surface::Window).
 ///
@@ -27,6 +29,19 @@ pub struct WindowState {
 
     /// True if the window is minimized
     minimized: bool,
+
+    /// When `false`, the surface is shown as an embedded [`egui::Window`] even if multi-viewport is enabled.
+    native_viewport: bool,
+
+    /// When `true`, the surface is drawn as an [`egui::Area`] inside its parent viewport (CTRL tear-off).
+    floating_in_viewport: bool,
+
+    /// Position inside the parent viewport (for [`Self::floating_in_viewport`]).
+    viewport_local_position: Option<Pos2>,
+
+    /// Draw / hit-test order for contained floating panels (higher = closer to front).
+    #[cfg_attr(feature = "serde", serde(default))]
+    floating_z_rank: u32,
 }
 
 impl Default for WindowState {
@@ -39,6 +54,10 @@ impl Default for WindowState {
             expanded_height: None,
             new: true,
             minimized: false,
+            native_viewport: true,
+            floating_in_viewport: false,
+            viewport_local_position: None,
+            floating_z_rank: 0,
         }
     }
 }
@@ -47,6 +66,11 @@ impl WindowState {
     /// Create a default window state.
     pub(crate) fn new() -> Self {
         Self::default()
+    }
+
+    /// Returns a stable [`ViewportId`] for a detached window surface.
+    pub fn viewport_id(dock_area_id: Id, surface_index: SurfaceIndex) -> ViewportId {
+        ViewportId::from_hash_of(("egui_dock_window", dock_area_id, surface_index.0))
     }
 
     /// Set the position for this window in screen coordinates.
@@ -73,6 +97,57 @@ impl WindowState {
     /// Returns if this window is currently being dragged or not.
     pub fn dragged(&self) -> bool {
         self.dragged
+    }
+
+    /// Whether this detached surface is hosted in a native OS viewport.
+    pub fn uses_native_viewport(&self) -> bool {
+        self.native_viewport
+    }
+
+    /// Use a native OS viewport (`true`) or an embedded [`egui::Window`] (`false`) for this surface.
+    pub fn set_native_viewport(&mut self, native: bool) -> &mut Self {
+        self.native_viewport = native;
+        self
+    }
+
+    /// Show as a contained floating panel inside the parent viewport (not native, not [`egui::Window`]).
+    pub fn set_floating_in_viewport(&mut self, floating: bool) -> &mut Self {
+        self.floating_in_viewport = floating;
+        if floating {
+            self.native_viewport = false;
+        }
+        self
+    }
+
+    pub(crate) fn is_floating_in_viewport(&self) -> bool {
+        self.floating_in_viewport
+    }
+
+    /// Position of the floating panel inside its parent viewport.
+    pub fn set_viewport_local_position(&mut self, position: Pos2) -> &mut Self {
+        self.viewport_local_position = Some(position);
+        self
+    }
+
+    pub(crate) fn viewport_local_position_or(&self, default: Pos2) -> Pos2 {
+        self.viewport_local_position.unwrap_or(default)
+    }
+
+    pub(crate) fn set_viewport_local_position_persist(&mut self, position: Pos2) {
+        self.viewport_local_position = Some(position);
+    }
+
+    pub(crate) fn floating_size_hint(&self) -> Vec2 {
+        self.next_size
+            .unwrap_or_else(|| self.screen_rect.map(|r| r.size()).unwrap_or(Vec2::new(320.0, 240.0)))
+    }
+
+    pub(crate) fn floating_z_rank(&self) -> u32 {
+        self.floating_z_rank
+    }
+
+    pub(crate) fn set_floating_z_rank(&mut self, rank: u32) {
+        self.floating_z_rank = rank;
     }
 
     /// Set the height of this window when it is expanded.
@@ -111,6 +186,42 @@ impl WindowState {
     #[inline(always)]
     pub(crate) fn is_minimized(&self) -> bool {
         self.minimized
+    }
+
+    #[inline(always)]
+    pub(crate) fn update_screen_rect_from_viewport(&mut self, outer_rect: Option<Rect>) {
+        if let Some(rect) = outer_rect {
+            self.screen_rect = Some(rect);
+        }
+    }
+
+    /// Builds a [`ViewportBuilder`] for a native OS window hosting this surface.
+    pub(crate) fn create_viewport_builder(
+        &mut self,
+        title: String,
+        decorations: bool,
+        inner_size_override: Option<Vec2>,
+    ) -> ViewportBuilder {
+        let new = self.new;
+        let mut builder = ViewportBuilder::default()
+            .with_title(title)
+            .with_decorations(decorations);
+
+        if let Some(position) = self.next_position.take() {
+            builder = builder.with_position(position);
+        }
+        if let Some(size) = inner_size_override {
+            builder = builder.with_inner_size(size);
+            self.next_size = None;
+        } else if let Some(size) = self.next_size.take() {
+            builder = builder.with_inner_size(size);
+        } else if new {
+            if let Some(height) = self.expanded_height.take() {
+                builder = builder.with_min_inner_size(Vec2::new(200.0, height));
+            }
+        }
+        self.new = false;
+        builder
     }
 
     //the 'static in this case means that the `open` field is always `None`

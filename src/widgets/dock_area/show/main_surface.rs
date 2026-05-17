@@ -21,16 +21,15 @@ impl<Tab> DockArea<'_, Tab> {
             let rect = ui.available_rect_before_wrap();
             let response = ui.allocate_rect(rect, Sense::hover());
             if response.contains_pointer() {
-                ui.memory_mut(|mem| {
-                    mem.data.insert_temp(
-                        self.id.with("hover_data"),
-                        Some(HoverData {
-                            rect,
-                            dst: TreeComponent::Surface(surf_index),
-                            tab: None,
-                        }),
-                    );
-                });
+                super::super::drag_buffer::set_hover_data(
+                    ui.ctx(),
+                    self.id,
+                    HoverData {
+                        rect,
+                        dst: TreeComponent::Surface(surf_index),
+                        tab: None,
+                    },
+                );
             }
             return;
         }
