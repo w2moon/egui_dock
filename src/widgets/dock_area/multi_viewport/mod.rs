@@ -1,14 +1,18 @@
 //! Multi-viewport docking helpers (inspired by [egui_docking](https://github.com/Latias94/egui_docking)).
 
 mod contained_floating;
+mod drag_state;
 mod drop;
 mod geometry;
 mod ghost;
 mod payload;
+mod pending_drop;
 
+pub use drag_state::MultiViewportDragState;
 pub use geometry::{leaf_rect_to_screen, pointer_latest_in_screen};
 pub use ghost::show_ghost_preview;
 pub use payload::DockDragPayload;
+pub use pending_drop::PendingDrop;
 
 /// Options for [`crate::DockArea::multi_viewport`] behavior.
 #[derive(Clone, Debug, PartialEq)]
@@ -26,6 +30,8 @@ pub struct MultiViewportOptions {
     pub contained_window_on_ctrl: bool,
     /// When `true`, holding SHIFT disables docking targets while dragging (ImGui `ConfigDockingWithShift=false`).
     pub disable_docking_while_shift: bool,
+    /// Mid-drag tear-off when the pointer leaves all dock rects (ImGui ghost docking). Re-docks on release like normal drag.
+    pub ghost_tear_off: bool,
 }
 
 impl Default for MultiViewportOptions {
@@ -37,6 +43,7 @@ impl Default for MultiViewportOptions {
             tear_off_to_floating_on_ctrl: true,
             contained_window_on_ctrl: false,
             disable_docking_while_shift: false,
+            ghost_tear_off: false,
         }
     }
 }

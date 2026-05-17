@@ -72,7 +72,7 @@ impl<Tab> DockArea<'_, Tab> {
                 if let Some(screen) =
                     leaf_rect_to_screen(ui.ctx(), self.id, surf_index, node_rect)
                 {
-                    state.push_dock_rect_screen(surf_index, screen);
+                    state.push_dock_rect_screen(surf_index, crate::NodeIndex::root(), screen);
                 }
             }
         }

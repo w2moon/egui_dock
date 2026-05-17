@@ -64,6 +64,10 @@ impl<Tab> DockArea<'_, Tab> {
 
         let mut state = State::load(&ctx, self.id);
         state.clear_dock_rects_screen();
+        if self.multi_viewport {
+            state.mv_drag.begin_frame();
+            state.pending_drop = None;
+        }
 
         if self.multi_viewport {
             if !ctx.input(|i| i.pointer.any_released()) {
@@ -120,10 +124,15 @@ impl<Tab> DockArea<'_, Tab> {
                 &mut state,
             );
             self.show_viewport_surfaces(&ctx, tab_viewer, &mut state, fade_arg);
+            state.mv_drag.update_from_ctx(&ctx, true);
         }
 
         if self.multi_viewport {
             self.process_multi_viewport_drag_drop(&ctx, ui, &mut state, tab_viewer);
+            self.apply_pending_drop(&ctx, &mut state, tab_viewer);
+            if ctx.input(|i| i.pointer.any_released()) {
+                state.reset_drag();
+            }
         } else {
             self.process_embedded_drag_drop(ui, &mut state, tab_viewer);
         }
@@ -230,12 +239,9 @@ impl<Tab> DockArea<'_, Tab> {
         state: &mut State,
         tab_viewer: &mut impl TabViewer<Tab = Tab>,
     ) {
-        let (drag_data, hover_data) = ui.memory_mut(|mem| {
-            (
-                mem.data.remove_temp(self.id.with("drag_data")).flatten(),
-                mem.data.remove_temp(self.id.with("hover_data")).flatten(),
-            )
-        });
+        let ctx = ui.ctx();
+        let drag_data = super::drag_buffer::take_drag_data(ctx, self.id);
+        let hover_data = super::drag_buffer::take_hover_data(ctx, self.id);
 
         if let (Some(source), Some(hover)) = (drag_data, hover_data) {
             let style = self.style.as_ref().unwrap();
@@ -258,16 +264,14 @@ impl<Tab> DockArea<'_, Tab> {
         state: &mut State,
         tab_viewer: &mut impl TabViewer<Tab = Tab>,
     ) {
-        let (drag_data, hover_data) = ui.memory_mut(|mem| {
-            (
-                mem.data.remove_temp(self.id.with("drag_data")).flatten(),
-                mem.data.remove_temp(self.id.with("hover_data")).flatten(),
-            )
-        });
+        state.mv_drag.update_from_ctx(ctx, true);
+
+        let drag_data = super::drag_buffer::take_drag_data(ctx, self.id);
+        let hover_data = super::drag_buffer::take_hover_data(ctx, self.id);
 
         let mut hover_data = hover_data;
         if hover_data.is_none() {
-            if let Some(pointer_screen) = pointer_latest_in_screen(ctx) {
+            if let Some(pointer_screen) = self.pointer_screen_for_dock(ctx, state) {
                 hover_data = self.resolve_hover_for_cross_viewport(ctx, state, pointer_screen);
             }
         }
@@ -279,6 +283,8 @@ impl<Tab> DockArea<'_, Tab> {
 
         if self.multi_viewport_options.live_tear_off {
             self.try_live_tear_off(ctx, state, tab_viewer);
+        } else if self.multi_viewport_options.ghost_tear_off {
+            self.try_live_tear_off(ctx, state, tab_viewer);
         }
 
         let payload_active = super::multi_viewport::DockDragPayload::get(ctx).is_some();
@@ -286,13 +292,14 @@ impl<Tab> DockArea<'_, Tab> {
         if state.dnd.is_some() {
             let tab_dst = self.show_drag_drop_overlay(ui, state, tab_viewer, true);
 
-            if ctx.input(|i| i.pointer.any_released()) {
+            if ctx.input(|i| i.pointer.any_released()) && state.pending_drop.is_none() {
                 let mut destination = tab_dst;
                 if self.multi_viewport_options.detach_on_alt && ctx.input(|i| i.modifiers.alt) {
                     if let Some(dnd) = state.dnd.as_ref() {
                         if let TreeComponent::Tab(_) = dnd.drag.src {
-                            let pointer =
-                                pointer_latest_in_screen(ctx).unwrap_or(dnd.pointer);
+                            let pointer = self
+                                .pointer_screen_for_dock(ctx, state)
+                                .unwrap_or(dnd.pointer);
                             destination = Some(TabDestination::Window(Rect::from_min_size(
                                 pointer,
                                 dnd.drag.rect.size(),
@@ -302,10 +309,14 @@ impl<Tab> DockArea<'_, Tab> {
                 }
 
                 if state.dnd.is_some() {
-                    self.apply_tab_drop(destination, state, tab_viewer, ctx);
-                    self.clear_drag_payload_if_ours(ctx);
+                    state.pending_drop = Some(super::multi_viewport::PendingDrop::Tab {
+                        destination,
+                    });
                 } else {
-                    self.apply_cross_viewport_drop(ctx, destination);
+                    state.pending_drop =
+                        Some(super::multi_viewport::PendingDrop::CrossViewport {
+                            fallback_destination: destination,
+                        });
                 }
             }
 
@@ -315,19 +326,18 @@ impl<Tab> DockArea<'_, Tab> {
                 }
             }
         } else if payload_active {
-            if ctx.input(|i| i.pointer.any_released()) {
+            if ctx.input(|i| i.pointer.any_released()) && state.pending_drop.is_none() {
                 let destination =
                     self.resolve_cross_viewport_drop_destination(ctx, state);
-                self.apply_cross_viewport_drop(ctx, destination);
+                state.pending_drop =
+                    Some(super::multi_viewport::PendingDrop::CrossViewport {
+                        fallback_destination: destination,
+                    });
             }
-        }
-
-        if ctx.input(|i| i.pointer.any_released()) {
-            state.reset_drag();
         }
     }
 
-    fn apply_tab_drop(
+    pub(in crate::widgets::dock_area) fn apply_tab_drop(
         &mut self,
         destination: Option<TabDestination>,
         state: &mut State,
@@ -415,6 +425,13 @@ impl<Tab> DockArea<'_, Tab> {
         tab_viewer: &impl TabViewer<Tab = Tab>,
         use_global_pointer: bool,
     ) -> Option<TabDestination> {
+        let ctx = ui.ctx();
+        let pointer_screen = if use_global_pointer {
+            self.pointer_screen_for_dock(ctx, state)
+        } else {
+            None
+        };
+
         let drag_state = state.dnd.as_mut().unwrap();
         let style = self.style.as_ref().unwrap();
 
@@ -455,13 +472,7 @@ impl<Tab> DockArea<'_, Tab> {
         }
 
         let window_bounds = self.window_bounds.unwrap();
-        let ctx = ui.ctx();
         let overlay_id = self.id.with("dnd_overlay");
-        let pointer_screen = if use_global_pointer {
-            pointer_latest_in_screen(ctx)
-        } else {
-            None
-        };
         let shift_held = ctx.input(|i| i.modifiers.shift);
         let docking_allowed = !(self.multi_viewport_options.disable_docking_while_shift
             && shift_held);

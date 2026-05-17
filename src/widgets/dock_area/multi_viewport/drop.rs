@@ -5,8 +5,10 @@ use crate::{
         drag_and_drop::{HoverData, TreeComponent},
         state::State,
     },
-    DockArea, NodeIndex, NodePath, SurfaceIndex, TabDestination, TabPath,
+    DockArea, NodePath, SurfaceIndex, TabDestination, TabPath,
 };
+
+use super::pending_drop::PendingDrop;
 
 use super::geometry::viewport_for_surface;
 use super::payload::DockDragPayload;
@@ -32,6 +34,7 @@ impl<Tab> DockArea<'_, Tab> {
     pub(in crate::widgets::dock_area) fn apply_cross_viewport_drop(
         &mut self,
         ctx: &Context,
+        state: &State,
         destination: Option<TabDestination>,
     ) {
         let Some(payload) = DockDragPayload::take(ctx) else {
@@ -54,8 +57,9 @@ impl<Tab> DockArea<'_, Tab> {
                 let use_contained = self.multi_viewport_options.contained_window_on_ctrl
                     && ctx.input(|i| i.modifiers.ctrl);
                 if use_contained {
-                    let pointer =
-                        super::geometry::pointer_latest_in_screen(ctx).unwrap_or(Pos2::ZERO);
+                    let pointer = self
+                        .pointer_screen_for_dock(ctx, state)
+                        .unwrap_or(Pos2::ZERO);
                     let size = self.dock_state[payload.tab_path.node_path()]
                         .rect()
                         .map(|r| r.size())
@@ -86,22 +90,65 @@ impl<Tab> DockArea<'_, Tab> {
         state: &State,
         pointer_screen: Pos2,
     ) -> Option<HoverData> {
-        for &(surface, rect) in &state.dock_rects_screen {
-            if !rect.contains(pointer_screen) {
+        let mut best: Option<(f32, crate::dock_area::state::DockRectHit)> = None;
+        for hit in &state.dock_rects_screen {
+            if !hit.rect.contains(pointer_screen) {
                 continue;
             }
-            if let Some(local_rect) = self.screen_rect_to_local_leaf(ctx, surface, rect) {
-                return Some(HoverData {
-                    rect: local_rect,
-                    dst: TreeComponent::Node(NodePath {
-                        surface,
-                        node: NodeIndex::root(),
-                    }),
-                    tab: None,
-                });
+            let area = hit.rect.area();
+            if best.as_ref().is_none_or(|(best_area, _)| area < *best_area) {
+                best = Some((area, *hit));
             }
         }
-        None
+        let hit = best?.1;
+        let local_rect = self.screen_rect_to_local_leaf(ctx, hit.surface, hit.rect)?;
+        Some(HoverData {
+            rect: local_rect,
+            dst: TreeComponent::Node(NodePath {
+                surface: hit.surface,
+                node: hit.node,
+            }),
+            tab: None,
+        })
+    }
+
+    pub(in crate::widgets::dock_area) fn pointer_screen_for_dock(
+        &self,
+        ctx: &Context,
+        state: &State,
+    ) -> Option<Pos2> {
+        state
+            .mv_drag
+            .pointer_global_fallback(ctx)
+            .or_else(|| super::geometry::pointer_latest_in_screen(ctx))
+    }
+
+    pub(in crate::widgets::dock_area) fn apply_pending_drop(
+        &mut self,
+        ctx: &Context,
+        state: &mut State,
+        tab_viewer: &mut impl crate::TabViewer<Tab = Tab>,
+    ) {
+        let Some(pending) = state.pending_drop.take() else {
+            return;
+        };
+
+        match pending {
+            PendingDrop::Tab { destination } => {
+                if state.dnd.is_some() {
+                    self.apply_tab_drop(destination, state, tab_viewer, ctx);
+                    self.clear_drag_payload_if_ours(ctx);
+                }
+            }
+            PendingDrop::CrossViewport {
+                fallback_destination,
+            } => {
+                let destination = self
+                    .resolve_cross_viewport_drop_destination(ctx, state)
+                    .or(fallback_destination);
+                self.apply_cross_viewport_drop(ctx, state, destination);
+            }
+        }
     }
 
     fn screen_rect_to_local_leaf(
@@ -126,7 +173,7 @@ impl<Tab> DockArea<'_, Tab> {
         ctx: &Context,
         tab_path: TabPath,
     ) {
-        let pointer = super::geometry::pointer_latest_in_screen(ctx).unwrap_or(Pos2::ZERO);
+        let pointer = super::geometry::pointer_pos_in_global(ctx).unwrap_or(Pos2::ZERO);
         let viewport_id = viewport_for_surface(self.id, tab_path.surface);
         let local_pos = ctx.input(|i| {
             let inner = i.raw.viewports.get(&viewport_id)?.inner_rect?;
@@ -160,7 +207,7 @@ impl<Tab> DockArea<'_, Tab> {
         ctx: &Context,
         state: &State,
     ) -> Option<TabDestination> {
-        let pointer = super::geometry::pointer_latest_in_screen(ctx)?;
+        let pointer = self.pointer_screen_for_dock(ctx, state)?;
         let shift_blocks_dock = self.multi_viewport_options.disable_docking_while_shift
             && ctx.input(|i| i.modifiers.shift);
 

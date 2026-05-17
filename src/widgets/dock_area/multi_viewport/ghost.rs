@@ -45,8 +45,8 @@ impl<Tab> DockArea<'_, Tab> {
         state: &State,
         pointer_screen: Pos2,
     ) -> bool {
-        state.dock_rects_screen.iter().any(|(_, rect)| {
-            rect.expand(2.0).contains(pointer_screen)
+        state.dock_rects_screen.iter().any(|hit| {
+            hit.rect.expand(2.0).contains(pointer_screen)
         }) || {
             // Root dock rect may not include a leaf yet (empty surface).
             let main_inner = ctx.input(|i| {
@@ -78,7 +78,11 @@ impl<Tab> DockArea<'_, Tab> {
             return;
         };
 
-        let Some(pointer_screen) = pointer_latest_in_screen(ctx) else {
+        let Some(pointer_screen) = state
+            .mv_drag
+            .pointer_global_fallback(ctx)
+            .or_else(|| pointer_latest_in_screen(ctx))
+        else {
             return;
         };
 

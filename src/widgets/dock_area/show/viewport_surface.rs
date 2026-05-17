@@ -123,6 +123,7 @@ impl<Tab> DockArea<'_, Tab> {
             }
 
             let panel = |ui: &mut egui::Ui| {
+                state.mv_drag.update_from_ctx(ui.ctx(), true);
                 if fade_factor != 1.0 {
                     fade_visuals(ui.visuals_mut(), fade_factor);
                 }

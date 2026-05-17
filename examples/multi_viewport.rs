@@ -36,6 +36,7 @@ impl egui_dock::TabViewer for TabViewer {
             ui.label("SHIFT：按住时禁用停靠目标（仅拆出新窗口）");
             ui.label("ALT：任意位置松开强制拆出");
             ui.label("CTRL：拆出为当前视口内的浮动面板（可拖动标题栏）");
+            ui.label("ghost_tear_off：拖出停靠区时临时拆出，松手仍可落点停靠");
         });
     }
 
@@ -67,6 +68,7 @@ impl eframe::App for MyApp {
             .multi_viewport(true)
             .multi_viewport_options(MultiViewportOptions {
                 ghost_preview: true,
+                ghost_tear_off: true,
                 live_tear_off: false,
                 ..MultiViewportOptions::default()
             })

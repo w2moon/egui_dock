@@ -7,6 +7,7 @@ mod show;
 // Various components of the `DockArea` which is used when rendering
 mod allowed_splits;
 mod drag_and_drop;
+mod drag_buffer;
 mod state;
 mod tab_removal;
 

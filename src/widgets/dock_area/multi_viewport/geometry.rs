@@ -2,6 +2,37 @@ use egui::{Context, Pos2, Rect, ViewportId};
 
 use crate::{SurfaceIndex, WindowState};
 
+/// Pointer in screen space for the active viewport (`inner_rect.min + local`).
+pub fn pointer_pos_in_global(ctx: &Context) -> Option<Pos2> {
+    ctx.input(|i| {
+        let pos = i.pointer.latest_pos()?;
+        let inner = i.viewport().inner_rect?;
+        Some(inner.min + pos.to_vec2())
+    })
+}
+
+/// Viewport whose `inner_rect` contains `pointer_global` (topmost wins).
+pub fn viewport_under_pointer_global(ctx: &Context, pointer_global: Pos2) -> Option<ViewportId> {
+    ctx.input(|i| {
+        let mut best: Option<(ViewportId, f32)> = None;
+        for (id, vp) in &i.raw.viewports {
+            let Some(inner) = vp.inner_rect else {
+                continue;
+            };
+            if !inner.contains(pointer_global) {
+                continue;
+            }
+            let area = inner.width() * inner.height();
+            match best {
+                None => best = Some((*id, area)),
+                Some((_, best_area)) if area < best_area => best = Some((*id, area)),
+                _ => {}
+            }
+        }
+        best.map(|(id, _)| id)
+    })
+}
+
 /// Viewport hosting a given dock surface.
 #[inline]
 pub fn viewport_for_surface(dock_area_id: egui::Id, surface: SurfaceIndex) -> ViewportId {
@@ -32,9 +63,5 @@ pub fn leaf_rect_to_screen(
 
 /// Latest pointer position in screen space for the active viewport.
 pub fn pointer_latest_in_screen(ctx: &Context) -> Option<Pos2> {
-    ctx.input(|i| {
-        let pos = i.pointer.latest_pos()?;
-        let inner = i.viewport().inner_rect?;
-        Some(inner.min + pos.to_vec2())
-    })
+    pointer_pos_in_global(ctx)
 }
