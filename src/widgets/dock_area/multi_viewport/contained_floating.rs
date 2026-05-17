@@ -15,7 +15,7 @@ impl<Tab> DockArea<'_, Tab> {
         tab_viewer: &mut impl TabViewer<Tab = Tab>,
         state: &mut State,
     ) {
-        let surfaces: Vec<SurfaceIndex> = self
+        let mut surfaces: Vec<SurfaceIndex> = self
             .dock_state
             .valid_surface_indices()
             .iter()
@@ -28,6 +28,8 @@ impl<Tab> DockArea<'_, Tab> {
             })
             .filter(|&s| viewport_for_surface(self.id, s) == host_viewport)
             .collect();
+
+        self.sort_contained_floating_surfaces(&mut surfaces);
 
         let inner_min = ui.ctx().input(|i| {
             i.raw
@@ -88,6 +90,10 @@ impl<Tab> DockArea<'_, Tab> {
                     });
                     ui.response()
                 });
+
+            if response.response.clicked() || response.response.drag_started() {
+                self.bring_contained_floating_to_front(host_viewport, surf_index);
+            }
 
             let allow_panel_drag = !(is_ghost_panel && ghost_active_drag);
             if allow_panel_drag && response.response.dragged() {

@@ -3,9 +3,10 @@
 use std::fs;
 
 use eframe::{egui, NativeOptions};
-use egui_dock::{DockArea, DockState, NodeIndex, Style};
+use egui_dock::{DockArea, DockLayoutFile, DockState, NodeIndex, Style};
 
-const DOCK_STATE_FILE: &str = "target/dock_state.json";
+const DOCK_STATE_JSON: &str = "target/dock_layout.json";
+const DOCK_STATE_RON: &str = "target/dock_layout.ron";
 
 fn main() -> eframe::Result<()> {
     let options = NativeOptions::default();
@@ -41,16 +42,17 @@ struct MyApp {
 }
 
 impl MyApp {
-    fn save_json(&self) {
-        if let Ok(json) = serde_json::to_string(&self.tree) {
-            let _ = fs::write(DOCK_STATE_FILE, json);
-        }
+    fn save_layouts(&self) {
+        let _ = self.tree.save_layout_json_to_file(DOCK_STATE_JSON);
+        let _ = self.tree.save_layout_ron_to_file(DOCK_STATE_RON);
     }
 
-    fn load_json() -> Option<Self> {
-        fs::read_to_string(DOCK_STATE_FILE)
+    fn load_layout() -> Option<Self> {
+        if let Ok(tree) = DockLayoutFile::load_from_ron_file(DOCK_STATE_RON) {
+            return Some(Self { tree });
+        }
+        DockLayoutFile::load_from_json_file(DOCK_STATE_JSON)
             .ok()
-            .and_then(|data| serde_json::from_str(&data).ok())
             .map(|tree| Self { tree })
     }
 }
@@ -58,7 +60,7 @@ impl MyApp {
 impl Default for MyApp {
     fn default() -> Self {
         // Try loading from file, fallback to default layout
-        Self::load_json().unwrap_or_else(|| {
+        Self::load_layout().unwrap_or_else(|| {
             let mut tree = DockState::new(vec!["tab1".to_owned(), "tab2".to_owned()]);
 
             let [a, b] =
@@ -83,7 +85,7 @@ impl eframe::App for MyApp {
             .style(Style::from_egui(ui.style().as_ref()))
             .show_inside(ui, &mut tab_viewer);
         if tab_viewer.modified {
-            self.save_json();
+            self.save_layouts();
         }
     }
 }

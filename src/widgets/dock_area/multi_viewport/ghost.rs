@@ -166,6 +166,14 @@ impl<Tab> DockArea<'_, Tab> {
             return;
         }
 
+        let host = ctx.viewport_id();
+        if self
+            .contained_floating_under_pointer(ctx, host, pointer_screen, None)
+            .is_some()
+        {
+            return;
+        }
+
         let allowed_in_windows = {
             let Some(leaf) = self.dock_state[src.node_path()].get_leaf_mut() else {
                 return;

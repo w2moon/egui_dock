@@ -38,6 +38,10 @@ pub struct WindowState {
 
     /// Position inside the parent viewport (for [`Self::floating_in_viewport`]).
     viewport_local_position: Option<Pos2>,
+
+    /// Draw / hit-test order for contained floating panels (higher = closer to front).
+    #[cfg_attr(feature = "serde", serde(default))]
+    floating_z_rank: u32,
 }
 
 impl Default for WindowState {
@@ -53,6 +57,7 @@ impl Default for WindowState {
             native_viewport: true,
             floating_in_viewport: false,
             viewport_local_position: None,
+            floating_z_rank: 0,
         }
     }
 }
@@ -135,6 +140,14 @@ impl WindowState {
     pub(crate) fn floating_size_hint(&self) -> Vec2 {
         self.next_size
             .unwrap_or_else(|| self.screen_rect.map(|r| r.size()).unwrap_or(Vec2::new(320.0, 240.0)))
+    }
+
+    pub(crate) fn floating_z_rank(&self) -> u32 {
+        self.floating_z_rank
+    }
+
+    pub(crate) fn set_floating_z_rank(&mut self, rank: u32) {
+        self.floating_z_rank = rank;
     }
 
     /// Set the height of this window when it is expanded.

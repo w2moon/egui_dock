@@ -9,6 +9,7 @@ use super::DockState;
 
 pub const DOCK_LAYOUT_VERSION: u32 = 1;
 
+/// On-disk layout envelope (version + full [`DockState`]), JSON or RON.
 #[derive(Serialize, Deserialize)]
 pub struct DockLayoutFile<Tab> {
     pub version: u32,
@@ -28,6 +29,8 @@ impl<Tab> DockLayoutFile<Tab> {
 pub enum DockLayoutError {
     UnsupportedVersion { found: u32, expected: u32 },
     Json(serde_json::Error),
+    /// RON parse/serialize failure.
+    Ron(String),
     Io(std::io::Error),
 }
 
@@ -38,6 +41,7 @@ impl std::fmt::Display for DockLayoutError {
                 write!(f, "unsupported layout version {found} (expected {expected})")
             }
             Self::Json(err) => write!(f, "json error: {err}"),
+            Self::Ron(err) => write!(f, "ron error: {err}"),
             Self::Io(err) => write!(f, "io error: {err}"),
         }
     }
@@ -64,9 +68,24 @@ where
         serde_json::to_string_pretty(&file).map_err(DockLayoutError::Json)
     }
 
+    /// Serialize the full dock layout to RON (egui_docking-style snapshots).
+    pub fn to_layout_ron(&self) -> Result<String, DockLayoutError> {
+        let file = DockLayoutFileRef {
+            version: DOCK_LAYOUT_VERSION,
+            dock_state: self,
+        };
+        ron::ser::to_string_pretty(&file, ron::ser::PrettyConfig::new())
+            .map_err(|e| DockLayoutError::Ron(e.to_string()))
+    }
+
     /// Save layout JSON to a file.
     pub fn save_layout_json_to_file(&self, path: impl AsRef<Path>) -> Result<(), DockLayoutError> {
         fs::write(path, self.to_layout_json()?).map_err(DockLayoutError::Io)
+    }
+
+    /// Save layout RON to a file.
+    pub fn save_layout_ron_to_file(&self, path: impl AsRef<Path>) -> Result<(), DockLayoutError> {
+        fs::write(path, self.to_layout_ron()?).map_err(DockLayoutError::Io)
     }
 }
 
@@ -76,6 +95,10 @@ where
 {
     pub fn from_json_str(json: &str) -> Result<Self, DockLayoutError> {
         serde_json::from_str(json).map_err(DockLayoutError::Json)
+    }
+
+    pub fn from_ron_str(ron_text: &str) -> Result<Self, DockLayoutError> {
+        ron::from_str(ron_text).map_err(|e| DockLayoutError::Ron(e.to_string()))
     }
 
     pub fn into_dock_state(self) -> Result<DockState<Tab>, DockLayoutError> {
@@ -88,8 +111,18 @@ where
         Ok(self.dock_state)
     }
 
-    pub fn load_from_file(path: impl AsRef<Path>) -> Result<DockState<Tab>, DockLayoutError> {
+    pub fn load_from_json_file(path: impl AsRef<Path>) -> Result<DockState<Tab>, DockLayoutError> {
         let text = fs::read_to_string(path).map_err(DockLayoutError::Io)?;
         Self::from_json_str(&text)?.into_dock_state()
+    }
+
+    pub fn load_from_ron_file(path: impl AsRef<Path>) -> Result<DockState<Tab>, DockLayoutError> {
+        let text = fs::read_to_string(path).map_err(DockLayoutError::Io)?;
+        Self::from_ron_str(&text)?.into_dock_state()
+    }
+
+    /// Load layout JSON from a file (alias).
+    pub fn load_from_file(path: impl AsRef<Path>) -> Result<DockState<Tab>, DockLayoutError> {
+        Self::load_from_json_file(path)
     }
 }

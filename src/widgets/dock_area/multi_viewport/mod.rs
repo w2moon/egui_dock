@@ -3,6 +3,7 @@
 mod contained_floating;
 mod drag_state;
 mod drop;
+mod floating_z;
 mod geometry;
 mod ghost;
 mod ghost_drag;

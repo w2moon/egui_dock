@@ -66,6 +66,7 @@ impl<Tab> DockArea<'_, Tab> {
                         ws.set_viewport_local_position(local - grab_offset);
                     }
                 }
+                self.register_contained_floating(host_viewport, surface);
                 surface
             }
         };
@@ -170,6 +171,7 @@ impl<Tab> DockArea<'_, Tab> {
                 ws.set_floating_in_viewport(true);
                 ws.set_viewport_local_position_persist(local - ghost.grab_offset);
             }
+            self.register_contained_floating(ghost.host_viewport, ghost.torn_surface);
         }
 
         state.live_tear_off_surface = None;

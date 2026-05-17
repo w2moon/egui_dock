@@ -312,6 +312,8 @@ impl<Tab> DockArea<'_, Tab> {
             }
         }
 
+        self.register_contained_floating(viewport_id, surface);
+
         DockDragPayload::clear(ctx);
         ctx.request_repaint();
     }
