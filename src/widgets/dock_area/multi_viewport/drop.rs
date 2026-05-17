@@ -2,10 +2,11 @@ use egui::{Context, Pos2, Rect, Vec2};
 
 use crate::{
     dock_area::{
-        drag_and_drop::{HoverData, TreeComponent},
+        drag_and_drop::{DragData, DragDropState, HoverData, TreeComponent},
         state::State,
     },
-    DockArea, NodePath, SurfaceIndex, TabDestination, TabPath,
+    DockArea, Node, NodePath, OverlayType, SurfaceIndex, TabDestination,
+    TabPath, TabViewer,
 };
 
 use super::pending_drop::PendingDrop;
@@ -144,10 +145,95 @@ impl<Tab> DockArea<'_, Tab> {
                 fallback_destination,
             } => {
                 let destination = self
-                    .resolve_cross_viewport_drop_destination(ctx, state)
+                    .resolve_cross_viewport_drop_destination(ctx, state, tab_viewer)
                     .or(fallback_destination);
                 self.apply_cross_viewport_drop(ctx, state, destination);
             }
+        }
+        state.ghost_drag = None;
+    }
+
+    fn pointer_local_on_surface(
+        &self,
+        ctx: &Context,
+        surface: SurfaceIndex,
+        pointer_screen: Pos2,
+    ) -> Option<Pos2> {
+        let viewport_id = viewport_for_surface(self.id, surface);
+        let inner_min = ctx.input(|i| {
+            i.raw
+                .viewports
+                .get(&viewport_id)?
+                .inner_rect
+                .map(|r| r.min)
+        })?;
+        Some(pointer_screen - inner_min.to_vec2())
+    }
+
+    fn resolve_cross_viewport_overlay_destination(
+        &mut self,
+        ctx: &Context,
+        state: &State,
+        tab_viewer: &impl TabViewer<Tab = Tab>,
+        pointer_screen: Pos2,
+    ) -> Option<TabDestination> {
+        let hover = self.resolve_hover_for_cross_viewport(ctx, state, pointer_screen)?;
+
+        let drag = if let Some(dnd) = &state.dnd {
+            dnd.drag.clone()
+        } else {
+            let payload = DockDragPayload::get(ctx)?;
+            if payload.dock_area_id != self.id {
+                return None;
+            }
+            let tab_path = payload.tab_path;
+            let rect = self.dock_state[tab_path.node_path()]
+                .rect()
+                .unwrap_or(Rect::NOTHING);
+            DragData {
+                src: TreeComponent::Tab(tab_path),
+                rect,
+            }
+        };
+
+        let surface = hover.dst.surface_address();
+        let pointer_local = self.pointer_local_on_surface(ctx, surface, pointer_screen)?;
+
+        let mut dnd = DragDropState {
+            hover,
+            drag,
+            pointer: pointer_local,
+            locked: None,
+        };
+
+        let style = self.style.as_ref()?;
+        let allowed_splits = self.allowed_splits;
+
+        let allowed_in_window = match dnd.drag.src {
+            TreeComponent::Tab(path) => {
+                let Node::Leaf(leaf) = &mut self.dock_state[path.node_path()] else {
+                    return None;
+                };
+                tab_viewer.allowed_in_windows(&mut leaf.tabs[path.tab.0])
+            }
+            _ => return None,
+        };
+
+        let window_bounds = self.window_bounds.unwrap_or(ctx.content_rect());
+        let overlay_id = self.id.with("cross_viewport_overlay");
+        let pointer_screen_opt = Some(pointer_screen);
+
+        match style.overlay.overlay_type {
+            OverlayType::HighlightedAreas | OverlayType::Widgets => dnd.resolve_traditional_ctx(
+                ctx,
+                overlay_id,
+                style,
+                allowed_splits,
+                allowed_in_window,
+                window_bounds,
+                true,
+                pointer_screen_opt,
+            ),
         }
     }
 
@@ -203,17 +289,20 @@ impl<Tab> DockArea<'_, Tab> {
 
     /// Resolves where a tab should land when the pointer is released (cross-viewport path).
     pub(in crate::widgets::dock_area) fn resolve_cross_viewport_drop_destination(
-        &self,
+        &mut self,
         ctx: &Context,
         state: &State,
+        tab_viewer: &impl TabViewer<Tab = Tab>,
     ) -> Option<TabDestination> {
         let pointer = self.pointer_screen_for_dock(ctx, state)?;
         let shift_blocks_dock = self.multi_viewport_options.disable_docking_while_shift
             && ctx.input(|i| i.modifiers.shift);
 
         if !shift_blocks_dock {
-            if let Some(hover) = self.resolve_hover_for_cross_viewport(ctx, state, pointer) {
-                return Some(hover.dst.as_tab_destination());
+            if let Some(dest) =
+                self.resolve_cross_viewport_overlay_destination(ctx, state, tab_viewer, pointer)
+            {
+                return Some(dest);
             }
         }
 

@@ -281,10 +281,13 @@ impl<Tab> DockArea<'_, Tab> {
             state.set_drag_and_drop(source, hover, ctx, style);
         }
 
+        self.finish_ghost_drag(ctx, state);
+        self.update_torn_viewport_follow_pointer(ctx, state);
+
         if self.multi_viewport_options.live_tear_off {
             self.try_live_tear_off(ctx, state, tab_viewer);
         } else if self.multi_viewport_options.ghost_tear_off {
-            self.try_live_tear_off(ctx, state, tab_viewer);
+            self.try_ghost_tear_off(ctx, state, tab_viewer);
         }
 
         let payload_active = super::multi_viewport::DockDragPayload::get(ctx).is_some();
@@ -328,7 +331,7 @@ impl<Tab> DockArea<'_, Tab> {
         } else if payload_active {
             if ctx.input(|i| i.pointer.any_released()) && state.pending_drop.is_none() {
                 let destination =
-                    self.resolve_cross_viewport_drop_destination(ctx, state);
+                    self.resolve_cross_viewport_drop_destination(ctx, state, tab_viewer);
                 state.pending_drop =
                     Some(super::multi_viewport::PendingDrop::CrossViewport {
                         fallback_destination: destination,

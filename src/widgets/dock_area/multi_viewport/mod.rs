@@ -5,10 +5,12 @@ mod drag_state;
 mod drop;
 mod geometry;
 mod ghost;
+mod ghost_drag;
 mod payload;
 mod pending_drop;
 
 pub use drag_state::MultiViewportDragState;
+pub use ghost_drag::GhostDrag;
 pub use geometry::{leaf_rect_to_screen, pointer_latest_in_screen};
 pub use ghost::show_ghost_preview;
 pub use payload::DockDragPayload;
@@ -32,6 +34,10 @@ pub struct MultiViewportOptions {
     pub disable_docking_while_shift: bool,
     /// Mid-drag tear-off when the pointer leaves all dock rects (ImGui ghost docking). Re-docks on release like normal drag.
     pub ghost_tear_off: bool,
+    /// Expand dock hit area before starting ghost tear-off (screen points).
+    pub ghost_tear_off_threshold: f32,
+    /// When ghost tear-off starts outside the dock, spawn a native viewport immediately.
+    pub ghost_spawn_native_on_leave_dock: bool,
 }
 
 impl Default for MultiViewportOptions {
@@ -44,6 +50,8 @@ impl Default for MultiViewportOptions {
             contained_window_on_ctrl: false,
             disable_docking_while_shift: false,
             ghost_tear_off: false,
+            ghost_tear_off_threshold: 0.0,
+            ghost_spawn_native_on_leave_dock: true,
         }
     }
 }
