@@ -32,9 +32,10 @@ impl MultiViewportDragState {
         }
 
         if let Some(prev) = self.last_pointer_global {
+            // Use `i.pixels_per_point` — `ctx.pixels_per_point()` calls `ctx.input` again and deadlocks.
             let delta_points = ctx.input(|i| {
                 if let Some(motion) = i.pointer.motion() {
-                    let ppp = ctx.pixels_per_point();
+                    let ppp = i.pixels_per_point;
                     if ppp > 0.0 && ppp.is_finite() {
                         motion / ppp
                     } else {
