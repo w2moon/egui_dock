@@ -37,7 +37,8 @@ impl egui_dock::TabViewer for TabViewer {
             ui.label("ALT：任意位置松开强制拆出");
             ui.label("CTRL：拆出为当前视口内的浮动面板（可拖动标题栏）");
             ui.label("ghost_tear_off：拖出停靠区时临时拆出，ESC 还原，松手停靠");
-            ui.label("ghost_spawn_native_on_leave_dock：ghost 拆出时用原生窗口跟随指针");
+            ui.label("ghost_spawn_native_on_leave_dock=false：ghost 为视口内浮动面板");
+            ui.label("拖出停靠区 → 浮动 ghost；ESC 还原；松到空白处保留浮动面板");
         });
     }
 
@@ -70,7 +71,7 @@ impl eframe::App for MyApp {
             .multi_viewport_options(MultiViewportOptions {
                 ghost_preview: true,
                 ghost_tear_off: true,
-                ghost_spawn_native_on_leave_dock: true,
+                ghost_spawn_native_on_leave_dock: false,
                 live_tear_off: false,
                 ..MultiViewportOptions::default()
             })

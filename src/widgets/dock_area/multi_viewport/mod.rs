@@ -10,7 +10,7 @@ mod payload;
 mod pending_drop;
 
 pub use drag_state::MultiViewportDragState;
-pub use ghost_drag::GhostDrag;
+pub use ghost_drag::{GhostDrag, GhostDragMode};
 pub use geometry::{leaf_rect_to_screen, pointer_latest_in_screen};
 pub use ghost::show_ghost_preview;
 pub use payload::DockDragPayload;
@@ -37,6 +37,7 @@ pub struct MultiViewportOptions {
     /// Expand dock hit area before starting ghost tear-off (screen points).
     pub ghost_tear_off_threshold: f32,
     /// When ghost tear-off starts outside the dock, spawn a native viewport immediately.
+    /// When `false`, spawns a contained [`egui::Area`] panel in the source viewport instead.
     pub ghost_spawn_native_on_leave_dock: bool,
 }
 

@@ -117,6 +117,9 @@ impl<Tab> DockArea<'_, Tab> {
                     self.show_window_surface(ui, surface_index, tab_viewer, &mut state, fade_arg);
                 }
             }
+            if state.ghost_drag.is_some() {
+                self.update_ghost_follow_pointer(&ctx, &state);
+            }
             self.show_contained_floating_surfaces(
                 ui,
                 egui::ViewportId::ROOT,
@@ -282,7 +285,7 @@ impl<Tab> DockArea<'_, Tab> {
         }
 
         self.finish_ghost_drag(ctx, state);
-        self.update_torn_viewport_follow_pointer(ctx, state);
+        self.update_ghost_follow_pointer(ctx, state);
 
         if self.multi_viewport_options.live_tear_off {
             self.try_live_tear_off(ctx, state, tab_viewer);
@@ -355,7 +358,27 @@ impl<Tab> DockArea<'_, Tab> {
             _ => todo!("collections of tabs, like nodes and surfaces can't be docked (yet)"),
         };
 
-        if let TabDestination::Window(_) = destination {
+        if let TabDestination::Window(rect) = destination {
+            if let Some(ghost) = state.ghost_drag.as_ref() {
+                match ghost.mode {
+                    super::multi_viewport::GhostDragMode::ContainedFloating => {
+                        self.finalize_ghost_as_contained_floating(ctx, state, rect.min);
+                        let _ = tab_viewer;
+                        return;
+                    }
+                    super::multi_viewport::GhostDragMode::Native => {
+                        if let Some(ws) = self.dock_state.get_window_state_mut(ghost.torn_surface)
+                        {
+                            ws.set_position(rect.min);
+                        }
+                        state.ghost_drag = None;
+                        state.live_tear_off_surface = None;
+                        super::multi_viewport::DockDragPayload::clear(ctx);
+                        let _ = tab_viewer;
+                        return;
+                    }
+                }
+            }
             if self.multi_viewport_options.tear_off_to_floating_on_ctrl
                 && ctx.input(|i| i.modifiers.ctrl)
             {
@@ -384,6 +407,8 @@ impl<Tab> DockArea<'_, Tab> {
         }
 
         self.dock_state.move_tab(source, destination);
+        state.ghost_drag = None;
+        state.live_tear_off_surface = None;
     }
 
     fn dragged_tab_title(

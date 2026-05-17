@@ -35,7 +35,7 @@ impl<Tab> DockArea<'_, Tab> {
     pub(in crate::widgets::dock_area) fn apply_cross_viewport_drop(
         &mut self,
         ctx: &Context,
-        state: &State,
+        state: &mut State,
         destination: Option<TabDestination>,
     ) {
         let Some(payload) = DockDragPayload::take(ctx) else {
@@ -48,7 +48,25 @@ impl<Tab> DockArea<'_, Tab> {
         }
 
         if let Some(destination) = destination {
-            if let TabDestination::Window(_) = destination {
+            if let TabDestination::Window(rect) = destination {
+                if let Some(ghost) = state.ghost_drag.as_ref() {
+                    match ghost.mode {
+                        super::ghost_drag::GhostDragMode::ContainedFloating => {
+                            self.finalize_ghost_as_contained_floating(ctx, state, rect.min);
+                            return;
+                        }
+                        super::ghost_drag::GhostDragMode::Native => {
+                            if let Some(ws) =
+                                self.dock_state.get_window_state_mut(ghost.torn_surface)
+                            {
+                                ws.set_position(rect.min);
+                            }
+                            state.ghost_drag = None;
+                            state.live_tear_off_surface = None;
+                            return;
+                        }
+                    }
+                }
                 if self.multi_viewport_options.tear_off_to_floating_on_ctrl
                     && ctx.input(|i| i.modifiers.ctrl)
                 {
@@ -91,8 +109,13 @@ impl<Tab> DockArea<'_, Tab> {
         state: &State,
         pointer_screen: Pos2,
     ) -> Option<HoverData> {
+        let ghost_surface = self.ghost_torn_surface(state);
+
         let mut best: Option<(f32, crate::dock_area::state::DockRectHit)> = None;
         for hit in &state.dock_rects_screen {
+            if ghost_surface == Some(hit.surface) {
+                continue;
+            }
             if !hit.rect.contains(pointer_screen) {
                 continue;
             }
@@ -137,7 +160,13 @@ impl<Tab> DockArea<'_, Tab> {
         match pending {
             PendingDrop::Tab { destination } => {
                 if state.dnd.is_some() {
-                    self.apply_tab_drop(destination, state, tab_viewer, ctx);
+                    if destination.is_none() && self.is_contained_ghost_active(state) {
+                        if let Some(pointer) = self.pointer_screen_for_dock(ctx, state) {
+                            self.finalize_ghost_as_contained_floating(ctx, state, pointer);
+                        }
+                    } else {
+                        self.apply_tab_drop(destination, state, tab_viewer, ctx);
+                    }
                     self.clear_drag_payload_if_ours(ctx);
                 }
             }
@@ -150,7 +179,7 @@ impl<Tab> DockArea<'_, Tab> {
                 self.apply_cross_viewport_drop(ctx, state, destination);
             }
         }
-        state.ghost_drag = None;
+        state.live_tear_off_surface = None;
     }
 
     fn pointer_local_on_surface(
