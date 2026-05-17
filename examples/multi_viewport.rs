@@ -65,7 +65,7 @@ impl Default for MyApp {
 
 impl eframe::App for MyApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        DockArea::new(&mut self.dock_state)
+        let mut dock = DockArea::new(&mut self.dock_state)
             .style(Style::from_egui(ui.style().as_ref()))
             .multi_viewport(true)
             .multi_viewport_options(MultiViewportOptions {
@@ -74,7 +74,18 @@ impl eframe::App for MyApp {
                 ghost_spawn_native_on_leave_dock: false,
                 live_tear_off: false,
                 ..MultiViewportOptions::default()
-            })
-            .show_inside(ui, &mut TabViewer);
+            });
+
+        dock.show_native_viewports(ui.ctx(), &mut TabViewer);
+
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::central_panel(ui.style())
+                    .inner_margin(0.0)
+                    .fill(egui::Color32::TRANSPARENT),
+            )
+            .show_inside(ui, |ui| {
+                dock.show_inside(ui, &mut TabViewer);
+            });
     }
 }

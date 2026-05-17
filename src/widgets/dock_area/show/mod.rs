@@ -33,15 +33,22 @@ impl<Tab> DockArea<'_, Tab> {
     ///
     /// ```ignore
     /// fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-    ///     DockArea::new(&mut self.tree)
+    ///     let mut dock = DockArea::new(&mut self.tree)
     ///         .style(Style::from_egui(ui.style().as_ref()))
-    ///         .show_inside(ui, &mut tab_viewer);
+    ///         .multi_viewport(true);
+    ///     dock.show_native_viewports(ui.ctx(), &mut tab_viewer);
+    ///     egui::CentralPanel::default().show_inside(ui, |ui| {
+    ///         dock.show_inside(ui, &mut tab_viewer);
+    ///     });
     /// }
     /// ```
     #[inline]
     #[deprecated = "Use show_inside() instead — with eframe 0.34+, implement App::ui which gives &mut Ui directly"]
     #[allow(deprecated)]
-    pub fn show(self, ctx: &Context, tab_viewer: &mut impl TabViewer<Tab = Tab>) {
+    pub fn show(mut self, ctx: &Context, tab_viewer: &mut impl TabViewer<Tab = Tab>) {
+        if self.multi_viewport {
+            self.show_native_viewports(ctx, tab_viewer);
+        }
         CentralPanel::default()
             .frame(
                 Frame::central_panel(&ctx.global_style())
@@ -53,10 +60,55 @@ impl<Tab> DockArea<'_, Tab> {
             });
     }
 
+    /// Renders detached surfaces as native OS viewports.
+    ///
+    /// When [`Self::multi_viewport`] is enabled, call this on the root [`Context`] **before**
+    /// [`Self::show_inside`] (and before [`CentralPanel`](egui::CentralPanel)), not from inside a
+    /// panel callback. Nesting [`egui::Context::show_viewport_immediate`] under another panel can
+    /// deadlock on some platforms.
+    pub fn show_native_viewports(
+        &mut self,
+        ctx: &Context,
+        tab_viewer: &mut impl TabViewer<Tab = Tab>,
+    ) {
+        if !self.multi_viewport {
+            return;
+        }
+
+        self.style
+            .get_or_insert_with(|| Style::from_egui(ctx.global_style().as_ref()));
+        self.window_bounds.get_or_insert(ctx.content_rect());
+
+        let mut state = State::load(ctx, self.id);
+        let style = self.style.as_ref().unwrap();
+        let fade_surface =
+            self.hovered_window_surface(&mut state, style.overlay.feel.fade_hold_time, ctx);
+        let fade_arg = fade_surface.is_some().then(|| {
+            let mut fade_style = style.clone();
+            fade_dock_style(&mut fade_style, style.overlay.surface_fade_opacity);
+            (
+                fade_style,
+                style.overlay.surface_fade_opacity,
+                fade_surface.unwrap_or(SurfaceIndex::main()),
+            )
+        });
+        let fade_arg = fade_arg.as_ref().map(|(style, factor, surface)| {
+            (style as &Style, *factor, *surface)
+        });
+
+        self.show_viewport_surfaces(ctx, tab_viewer, &mut state, fade_arg);
+        state.store(ctx, self.id);
+    }
+
     /// Shows the docking hierarchy inside a [`Ui`].
     ///
-    /// See also [`show`](Self::show).
-    pub fn show_inside(mut self, ui: &mut Ui, tab_viewer: &mut impl TabViewer<Tab = Tab>) {
+    /// With [`Self::multi_viewport`], call [`Self::show_native_viewports`] on the root context
+    /// before this method. See also [`show`](Self::show).
+    pub fn show_inside(
+        &mut self,
+        ui: &mut Ui,
+        tab_viewer: &mut impl TabViewer<Tab = Tab>,
+    ) {
         let ctx = ui.ctx().clone();
         self.style
             .get_or_insert(Style::from_egui(ui.style().as_ref()));
@@ -126,7 +178,6 @@ impl<Tab> DockArea<'_, Tab> {
                 tab_viewer,
                 &mut state,
             );
-            self.show_viewport_surfaces(&ctx, tab_viewer, &mut state, fade_arg);
             state.mv_drag.update_from_ctx(&ctx, true);
         }
 
